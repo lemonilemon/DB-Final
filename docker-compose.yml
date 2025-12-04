@@ -1,0 +1,86 @@
+version: "3.8"
+services:
+  # --- PostgreSQL ---
+  # Default User: postgres
+  # Default DB: postgres
+  postgres:
+    image: postgres:16-alpine
+    container_name: db-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init/postgres:/docker-entrypoint-initdb.d
+    networks:
+      - db-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # --- pgAdmin (SQL GUI) ---
+  # URL: http://localhost:5050
+  # Login: admin@example.com / password
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: db-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: password
+    ports:
+      - "5050:80"
+    networks:
+      - db-network
+    depends_on:
+      - postgres
+  # --- MongoDB ---
+  # User: root
+  # DB: admin (default auth db)
+  mongodb:
+    image: mongo:7-jammy
+    container_name: db-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./init/mongo:/docker-entrypoint-initdb.d
+    networks:
+      - db-network
+    healthcheck:
+      test: ["CMD", "mongosh", "admin", "-u", "root", "-p", "password", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # --- Mongo Express (NoSQL GUI) ---
+  # URL: http://localhost:8081
+  # Login: admin / password
+  mongo-express:
+    image: mongo-express
+    container_name: db-mongo-express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: password
+      ME_CONFIG_MONGODB_URL: mongodb://root:password@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: password
+    ports:
+      - "8081:8081"
+    networks:
+      - db-network
+    depends_on:
+      - mongodb
+volumes:
+  postgres_data:
+  mongodb_data:
+networks:
+  db-network:
+    driver: bridge
