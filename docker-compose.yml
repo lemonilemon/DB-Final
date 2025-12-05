@@ -1,8 +1,28 @@
 version: "3.8"
 services:
+  # --- Backend API (FastAPI) ---
+  backend:
+    build: ./backend
+    container_name: app-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=postgres
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    volumes:
+      - ./backend:/app # 讓程式碼變更即時生效
+    networks:
+      - db-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
   # --- PostgreSQL ---
-  # Default User: postgres
-  # Default DB: postgres
   postgres:
     image: postgres:16-alpine
     container_name: db-postgres
@@ -13,7 +33,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init/postgres:/docker-entrypoint-initdb.d
+      - ./init/postgres:/docker-entrypoint-initdb.d # 掛載 SQL 初始化腳本
     networks:
       - db-network
     healthcheck:
@@ -21,9 +41,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  # --- pgAdmin (SQL GUI) ---
-  # URL: http://localhost:5050
-  # Login: admin@example.com / password
+  # --- pgAdmin ---
   pgadmin:
     image: dpage/pgadmin4
     container_name: db-pgadmin
@@ -38,8 +56,6 @@ services:
     depends_on:
       - postgres
   # --- MongoDB ---
-  # User: root
-  # DB: admin (default auth db)
   mongodb:
     image: mongo:7-jammy
     container_name: db-mongo
@@ -59,9 +75,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  # --- Mongo Express (NoSQL GUI) ---
-  # URL: http://localhost:8081
-  # Login: admin / password
+  # --- Mongo Express ---
   mongo-express:
     image: mongo-express
     container_name: db-mongo-express
