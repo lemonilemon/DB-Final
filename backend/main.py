@@ -1,61 +1,139 @@
-import os
-import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from pymongo import MongoClient
-from sqlalchemy import create_engine, text
+from fastapi import FastAPI, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-app = FastAPI()
-
-# --- 資料庫連線設定 (從環境變數讀取) ---
-# 注意：在 Docker 內部要用 service name (postgres, mongodb) 而不是 localhost
-PG_USER = os.getenv("POSTGRES_USER", "postgres")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
-PG_DB = os.getenv("POSTGRES_DB", "postgres")
-PG_HOST = "postgres"  # docker-compose service name
-
-MONGO_USER = os.getenv("MONGO_INITDB_ROOT_USERNAME", "root")
-MONGO_PASSWORD = os.getenv("MONGO_INITDB_ROOT_PASSWORD", "password")
-MONGO_HOST = "mongodb"  # docker-compose service name
+from database import init_db, close_db, get_session
+from mongodb import init_mongo, close_mongo, get_collection
+from models import (
+    User, UserRole, Fridge, FridgeAccess, Ingredient, FridgeItem,
+    Partner, ExternalProduct, ShoppingListItem, StoreOrder, OrderItem,
+    Recipe, RecipeRequirement, RecipeStep, RecipeReview, MealPlan
+)
 
 
-# --- 連線測試函式 ---
-def get_pg_connection():
-    # 使用 SQLAlchemy 建立連線
-    DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:5432/{PG_DB}"
-    engine = create_engine(DATABASE_URL)
-    return engine
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager.
+    Handles startup and shutdown events.
+    """
+    # Startup: Initialize databases
+    print("🚀 Starting NEW Fridge Backend...")
+    print("📦 Initializing PostgreSQL tables...")
+    await init_db()
+    print("✅ PostgreSQL initialized successfully!")
+
+    print("📊 Initializing MongoDB...")
+    await init_mongo()
+    print("✅ MongoDB initialized successfully!")
+
+    yield
+
+    # Shutdown: Close database connections
+    print("🛑 Shutting down...")
+    await close_db()
+    await close_mongo()
+    print("✅ All database connections closed.")
 
 
-def get_mongo_connection():
-    # 連線字串
-    MONGO_URL = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:27017/"
-    client = MongoClient(MONGO_URL)
-    return client
+# Create FastAPI app with lifespan manager
+app = FastAPI(
+    title="NEW Fridge API",
+    description="Smart inventory and procurement management system",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello from NEW Fridge Backend!"}
+async def read_root():
+    """Root endpoint - health check"""
+    return {
+        "message": "Hello from NEW Fridge Backend!",
+        "status": "running",
+        "version": "1.0.0"
+    }
 
 
 @app.get("/health/postgres")
-def health_pg():
+async def health_postgres(session: AsyncSession = Depends(get_session)):
+    """
+    PostgreSQL health check - tests async connection and queries User table.
+    """
     try:
-        engine = get_pg_connection()
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1")).scalar()
-        return {"status": "success", "result": result}
+        # Try to query the user table
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        return {
+            "status": "success",
+            "database": "PostgreSQL",
+            "message": "Connection successful",
+            "user_count": len(users)
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {
+            "status": "error",
+            "database": "PostgreSQL",
+            "message": str(e)
+        }
 
 
 @app.get("/health/mongo")
-def health_mongo():
+async def health_mongo():
+    """
+    MongoDB health check - tests connection and queries collections.
+    """
     try:
-        client = get_mongo_connection()
-        # 嘗試 ping admin 資料庫
-        client.admin.command("ping")
-        return {"status": "success", "message": "MongoDB connected!"}
+        # Get activity logs collection and count documents
+        activity_logs = get_collection("activity_logs")
+        count = await activity_logs.count_documents({})
+
+        return {
+            "status": "success",
+            "database": "MongoDB",
+            "message": "Connection successful",
+            "activity_log_count": count
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {
+            "status": "error",
+            "database": "MongoDB",
+            "message": str(e)
+        }
+
+
+@app.get("/health")
+async def health_all(session: AsyncSession = Depends(get_session)):
+    """
+    Complete health check - tests both PostgreSQL and MongoDB.
+    """
+    postgres_ok = False
+    mongo_ok = False
+    errors = []
+
+    # Check PostgreSQL
+    try:
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        postgres_ok = True
+    except Exception as e:
+        errors.append(f"PostgreSQL: {str(e)}")
+
+    # Check MongoDB
+    try:
+        activity_logs = get_collection("activity_logs")
+        await activity_logs.count_documents({})
+        mongo_ok = True
+    except Exception as e:
+        errors.append(f"MongoDB: {str(e)}")
+
+    return {
+        "status": "healthy" if (postgres_ok and mongo_ok) else "degraded",
+        "databases": {
+            "postgres": "connected" if postgres_ok else "error",
+            "mongodb": "connected" if mongo_ok else "error"
+        },
+        "errors": errors if errors else None
+    }

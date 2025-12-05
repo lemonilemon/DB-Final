@@ -1,7 +1,11 @@
 fastapi
 uvicorn[standard]
+sqlmodel
+asyncpg
 psycopg2-binary
 pymongo
-sqlalchemy
+motor
 python-dotenv
-bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
