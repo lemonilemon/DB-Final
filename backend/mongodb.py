@@ -1,14 +1,16 @@
-import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Optional
 
-# MongoDB configuration from environment variables
-MONGO_USER = os.getenv("MONGO_INITDB_ROOT_USERNAME", "root")
-MONGO_PASSWORD = os.getenv("MONGO_INITDB_ROOT_PASSWORD", "password")
-MONGO_HOST = "mongodb"  # docker-compose service name
+from core.config import (
+    MONGO_USER,
+    MONGO_PASSWORD,
+    MONGO_HOST,
+    MONGO_PORT,
+    MONGO_DB_NAME
+)
 
 # MongoDB URL
-MONGO_URL = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:27017/"
+MONGO_URL = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/"
 
 # Global MongoDB client
 mongo_client: Optional[AsyncIOMotorClient] = None
@@ -25,16 +27,16 @@ def get_mongo_client() -> AsyncIOMotorClient:
     return mongo_client
 
 
-def get_database(db_name: str = "newfridge"):
+def get_database(db_name: str = None):
     """
     Get a specific database from MongoDB.
-    Default: 'newfridge' database for logs and analytics.
+    Default: Uses MONGO_DB_NAME from config ('newfridge').
     """
     client = get_mongo_client()
-    return client[db_name]
+    return client[db_name or MONGO_DB_NAME]
 
 
-def get_collection(collection_name: str, db_name: str = "newfridge"):
+def get_collection(collection_name: str, db_name: str = None):
     """
     Get a specific collection from MongoDB.
 
@@ -62,8 +64,8 @@ async def init_mongo():
         await client.admin.command('ping')
         print("✅ MongoDB connection successful!")
 
-        # Get newfridge database
-        db = get_database("newfridge")
+        # Get database (uses MONGO_DB_NAME from config)
+        db = get_database()
 
         # Create collections with indexes
 

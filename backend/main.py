@@ -46,6 +46,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Import routers
+from routers.auth import router as auth_router
+from core.dependencies import get_current_active_user
+
+# Register routers
+app.include_router(auth_router)
+
 
 @app.get("/")
 async def read_root():
@@ -136,4 +143,28 @@ async def health_all(session: AsyncSession = Depends(get_session)):
             "mongodb": "connected" if mongo_ok else "error"
         },
         "errors": errors if errors else None
+    }
+
+
+@app.get("/api/me")
+async def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Protected endpoint - Get current authenticated user information.
+
+    Requires: Bearer token in Authorization header
+    """
+    from services.auth_service import AuthService
+
+    # Get user roles
+    roles = await AuthService.get_user_roles(current_user.user_id, session)
+
+    return {
+        "user_id": str(current_user.user_id),
+        "user_name": current_user.user_name,
+        "email": current_user.email,
+        "status": current_user.status,
+        "roles": roles
     }
