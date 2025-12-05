@@ -11,7 +11,8 @@ class Fridge(SQLModel, table=True):
 
     Matches schema:
     - fridge_id: UUID primary key
-    - fridge_name: Name of the fridge (max 30 chars)
+    - fridge_name: Name of the fridge (max 50 chars)
+    - description: Optional description (max 200 chars)
 
     Note: is_shared is removed; inferred from fridge_access table
     """
@@ -23,8 +24,13 @@ class Fridge(SQLModel, table=True):
         nullable=False
     )
     fridge_name: str = Field(
-        max_length=30,
+        max_length=50,
         nullable=False
+    )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        nullable=True
     )
 
     # Relationships

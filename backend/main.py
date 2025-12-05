@@ -48,10 +48,12 @@ app = FastAPI(
 
 # Import routers
 from routers.auth import router as auth_router
+from routers.fridge import router as fridge_router
 from core.dependencies import get_current_active_user
 
 # Register routers
 app.include_router(auth_router)
+app.include_router(fridge_router)
 
 
 @app.get("/")
