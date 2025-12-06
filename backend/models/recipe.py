@@ -14,8 +14,11 @@ class Recipe(SQLModel, table=True):
     - recipe_id: BIGINT identity primary key
     - owner_id: Foreign key to user (recipe creator)
     - recipe_name: Name of the recipe (max 100 chars)
+    - description: Recipe description/notes
     - cooking_time: Time in minutes
     - status: Recipe state (max 10 chars, default 'Pending')
+    - created_at: When recipe was created (like article timestamp)
+    - updated_at: When recipe was last modified
     """
     __tablename__ = "recipe"
 
@@ -32,6 +35,10 @@ class Recipe(SQLModel, table=True):
         max_length=100,
         nullable=False
     )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=500
+    )
     cooking_time: Optional[int] = Field(
         default=None,
         gt=0
@@ -39,7 +46,15 @@ class Recipe(SQLModel, table=True):
     status: str = Field(
         max_length=10,
         nullable=False,
-        default="Pending"
+        default="Published"
+    )
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        nullable=False
+    )
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        nullable=False
     )
 
     # Relationships
