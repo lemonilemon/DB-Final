@@ -6,7 +6,7 @@ This is critical for SQLAlchemy to know about all tables when creating/querying.
 """
 
 # User models
-from models.user import User, UserRole
+from models.user import User, UserRoleEnum
 
 # Fridge models
 from models.fridge import Fridge, FridgeAccess
@@ -35,7 +35,7 @@ from models.recipe import (
 __all__ = [
     # User
     "User",
-    "UserRole",
+    "UserRoleEnum",
     # Fridge
     "Fridge",
     "FridgeAccess",

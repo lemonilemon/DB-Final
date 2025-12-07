@@ -1,10 +1,10 @@
-from typing import Optional, List
+from typing import Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
 
-from models import User, UserRole
+from models import User
 from core.security import hash_password, verify_password, create_access_token
 from core.config import USER_STATUS_ACTIVE, USER_ROLE_USER
 from schemas.auth import UserRegisterRequest, UserLoginRequest, TokenResponse
@@ -55,25 +55,17 @@ class AuthService:
                 detail="Email already registered"
             )
 
-        # Create new user
+        # Create new user (role defaults to "User" in model)
         hashed_password = hash_password(request.password)
         new_user = User(
             user_name=request.user_name,
             email=request.email,
             password=hashed_password,
-            status=USER_STATUS_ACTIVE
+            status=USER_STATUS_ACTIVE,
+            role=USER_ROLE_USER  # Default role
         )
 
         session.add(new_user)
-        await session.flush()  # Flush to get user_id
-
-        # Assign default "User" role
-        user_role = UserRole(
-            user_id=new_user.user_id,
-            role=USER_ROLE_USER
-        )
-        session.add(user_role)
-
         await session.commit()
         await session.refresh(new_user)
 
@@ -124,17 +116,11 @@ class AuthService:
                 detail="User account is disabled"
             )
 
-        # Get user roles
-        stmt = select(UserRole).where(UserRole.user_id == user.user_id)
-        result = await session.execute(stmt)
-        user_roles = result.scalars().all()
-        roles = [ur.role for ur in user_roles]
-
-        # Create access token
+        # Create access token with user role
         token_data = {
             "sub": str(user.user_id),
             "username": user.user_name,
-            "roles": roles
+            "role": user.role
         }
         access_token = create_access_token(data=token_data)
 
@@ -143,7 +129,7 @@ class AuthService:
             token_type="bearer",
             user_id=user.user_id,
             user_name=user.user_name,
-            roles=roles
+            role=user.role
         )
 
     @staticmethod
@@ -166,21 +152,19 @@ class AuthService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_user_roles(
+    async def get_user_role(
         user_id: UUID,
         session: AsyncSession
-    ) -> List[str]:
+    ) -> Optional[str]:
         """
-        Get all roles for a user.
+        Get role for a user.
 
         Args:
             user_id: User UUID
             session: Database session
 
         Returns:
-            List of role names
+            User's role (User or Admin)
         """
-        stmt = select(UserRole).where(UserRole.user_id == user_id)
-        result = await session.execute(stmt)
-        user_roles = result.scalars().all()
-        return [ur.role for ur in user_roles]
+        user = await AuthService.get_user_by_id(user_id, session)
+        return user.role if user else None

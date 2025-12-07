@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from core.dependencies import get_current_user_id
+from core.dependencies import get_current_user_id, require_admin
+from models.user import User
 from schemas.procurement import (
     PartnerCreateRequest,
     PartnerResponse,
@@ -375,3 +376,134 @@ async def update_order_status(
         message="Order status updated",
         detail=f"Order #{order_id} status: {request.order_status}"
     )
+
+
+# ============================================================================
+# Admin Order Router (Admin-only operations)
+# ============================================================================
+
+admin_order_router = APIRouter(prefix="/api/admin/orders", tags=["Admin - Orders"])
+
+
+@admin_order_router.put(
+    "/{order_id}/status",
+    response_model=MessageResponse,
+    summary="[Admin] Update any order status"
+)
+async def admin_update_order_status(
+    order_id: int,
+    request: OrderUpdateStatusRequest,
+    admin_user: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    **[Admin Only]** Update the status of ANY order.
+
+    Valid statuses:
+    - Pending
+    - Processing
+    - Shipped
+    - Delivered
+    - Cancelled
+
+    Use this to manage orders on behalf of users or handle customer service issues.
+    """
+    from sqlalchemy import select, update
+    from models.procurement import StoreOrder
+
+    # Check if order exists
+    result = await session.execute(
+        select(StoreOrder).where(StoreOrder.order_id == order_id)
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Update status
+    await session.execute(
+        update(StoreOrder)
+        .where(StoreOrder.order_id == order_id)
+        .values(order_status=request.order_status)
+    )
+    await session.commit()
+
+    return MessageResponse(
+        message="Order status updated by admin",
+        detail=f"Order #{order_id} (User: {order.user_id}) → {request.order_status}"
+    )
+
+
+@admin_order_router.get(
+    "",
+    response_model=List[OrderResponse],
+    summary="[Admin] View all orders"
+)
+async def admin_get_all_orders(
+    admin_user: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+    user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
+    status_filter: Optional[str] = Query(None, description="Filter by order status")
+):
+    """
+    **[Admin Only]** View all orders in the system with optional filtering.
+
+    - Filter by user_id to see a specific user's orders
+    - Filter by status to see orders in a specific state
+    """
+    from sqlalchemy import select, and_
+    from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
+    from schemas.procurement import OrderItemResponse
+
+    # Build query
+    query = (
+        select(StoreOrder, Partner)
+        .join(Partner, StoreOrder.partner_id == Partner.partner_id)
+        .order_by(StoreOrder.order_date.desc())
+    )
+
+    if user_id:
+        query = query.where(StoreOrder.user_id == user_id)
+    if status_filter:
+        query = query.where(StoreOrder.order_status == status_filter)
+
+    result = await session.execute(query)
+    orders = result.all()
+
+    order_responses = []
+    for order, partner in orders:
+        # Get order items
+        items_result = await session.execute(
+            select(OrderItem, ExternalProduct)
+            .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
+            .where(OrderItem.order_id == order.order_id)
+        )
+        items = items_result.all()
+
+        item_responses = [
+            OrderItemResponse(
+                external_sku=item.external_sku,
+                product_name=product.product_name,
+                partner_name=partner.partner_name,
+                quantity=item.quantity,
+                deal_price=item.deal_price,
+                subtotal=item.deal_price * item.quantity
+            )
+            for item, product in items
+        ]
+
+        order_responses.append(
+            OrderResponse(
+                order_id=order.order_id,
+                user_id=order.user_id,
+                partner_id=order.partner_id,
+                partner_name=partner.partner_name,
+                order_date=order.order_date,
+                expected_arrival=order.expected_arrival,
+                total_price=order.total_price,
+                order_status=order.order_status,
+                items=item_responses
+            )
+        )
+
+    return order_responses

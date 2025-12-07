@@ -1,7 +1,12 @@
-from fastapi import APIRouter, Depends, status
+from typing import List
+from uuid import UUID
+from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database import get_session
+from core.dependencies import require_admin
+from models.user import User
 from schemas.auth import (
     UserRegisterRequest,
     UserLoginRequest,
@@ -82,7 +87,7 @@ async def login(
         user_id=token_response.user_id,
         metadata={
             "user_name": token_response.user_name,
-            "roles": token_response.roles
+            "role": token_response.role
         }
     )
 

@@ -48,7 +48,7 @@ class TokenResponse(BaseModel):
     token_type: str = Field(default="bearer", description="Token type")
     user_id: UUID = Field(..., description="User ID")
     user_name: str = Field(..., description="Username")
-    roles: List[str] = Field(..., description="User roles")
+    role: str = Field(..., description="User role (User or Admin)")
 
 
 class UserResponse(BaseModel):
@@ -59,7 +59,7 @@ class UserResponse(BaseModel):
     user_name: str
     email: str
     status: str
-    roles: List[str] = []
+    role: str = "User"
 
     class Config:
         from_attributes = True

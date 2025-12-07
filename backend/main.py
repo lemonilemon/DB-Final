@@ -7,7 +7,7 @@ from sqlalchemy import select
 from database import init_db, close_db, get_session
 from mongodb import init_mongo, close_mongo, get_collection
 from models import (
-    User, UserRole, Fridge, FridgeAccess, Ingredient, FridgeItem,
+    User, Fridge, FridgeAccess, Ingredient, FridgeItem,
     Partner, ExternalProduct, ShoppingListItem, StoreOrder, OrderItem,
     Recipe, RecipeRequirement, RecipeStep, RecipeReview, MealPlan
 )
@@ -46,6 +46,30 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add CORS middleware
+from fastapi.middleware.cors import CORSMiddleware
+from core.config import CORS_ORIGINS
+
+# Configure allowed origins
+allowed_origins = CORS_ORIGINS if CORS_ORIGINS else [
+    "http://localhost:3000",    # React default
+    "http://localhost:5173",    # Vite default
+    "http://localhost:8080",    # Vue default
+    "http://localhost:4200",    # Angular default
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:4200",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers (including Authorization)
+)
+
 # Add behavior tracking middleware
 from middleware.behavior_tracking import BehaviorTrackingMiddleware
 app.add_middleware(BehaviorTrackingMiddleware)
@@ -54,9 +78,10 @@ app.add_middleware(BehaviorTrackingMiddleware)
 from routers.auth import router as auth_router
 from routers.fridge import router as fridge_router
 from routers.inventory import ingredient_router, inventory_router
-from routers.procurement import partner_router, product_router, shopping_list_router, order_router, availability_router
+from routers.procurement import partner_router, product_router, shopping_list_router, order_router, availability_router, admin_order_router
 from routers.recipe import router as recipe_router, meal_plan_router
 from routers.analytics import router as analytics_router
+from routers.admin_users import router as admin_users_router
 from core.dependencies import get_current_active_user
 
 # Register routers
@@ -72,6 +97,10 @@ app.include_router(availability_router)
 app.include_router(recipe_router)
 app.include_router(meal_plan_router)
 app.include_router(analytics_router)
+
+# Admin routers
+app.include_router(admin_order_router)
+app.include_router(admin_users_router)
 
 
 @app.get("/")
@@ -168,23 +197,17 @@ async def health_all(session: AsyncSession = Depends(get_session)):
 
 @app.get("/api/me")
 async def get_current_user_info(
-    current_user: User = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Protected endpoint - Get current authenticated user information.
 
     Requires: Bearer token in Authorization header
     """
-    from services.auth_service import AuthService
-
-    # Get user roles
-    roles = await AuthService.get_user_roles(current_user.user_id, session)
-
     return {
         "user_id": str(current_user.user_id),
         "user_name": current_user.user_name,
         "email": current_user.email,
         "status": current_user.status,
-        "roles": roles
+        "role": current_user.role
     }

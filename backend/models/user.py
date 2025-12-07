@@ -1,8 +1,16 @@
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime
+from enum import Enum
 
-from sqlmodel import Field, SQLModel, Relationship
+from sqlmodel import Field, SQLModel, Relationship, Column
+from sqlalchemy import Enum as SQLEnum
+
+
+class UserRoleEnum(str, Enum):
+    """User role enumeration."""
+    USER = "User"
+    ADMIN = "Admin"
 
 
 class User(SQLModel, table=True):
@@ -15,6 +23,7 @@ class User(SQLModel, table=True):
     - password: Bcrypt hash (60 chars)
     - email: Unique email (max 50 chars)
     - status: Active or Disabled
+    - role: User or Admin (single role per user)
     """
     __tablename__ = "user"
 
@@ -44,38 +53,18 @@ class User(SQLModel, table=True):
         nullable=False,
         default="Active"
     )
+    role: str = Field(
+        sa_column=Column(
+            SQLEnum("User", "Admin", name="user_role_enum", create_type=False),
+            nullable=False,
+            server_default="User"
+        )
+    )
 
     # Relationships (will be populated when other models are created)
-    # roles: list["UserRole"] = Relationship(back_populates="user")
     # fridge_access: list["FridgeAccess"] = Relationship(back_populates="user")
     # shopping_list: list["ShoppingListItem"] = Relationship(back_populates="user")
     # orders: list["StoreOrder"] = Relationship(back_populates="user")
     # recipes: list["Recipe"] = Relationship(back_populates="owner")
     # meal_plans: list["MealPlan"] = Relationship(back_populates="user")
     # recipe_reviews: list["RecipeReview"] = Relationship(back_populates="user")
-
-
-class UserRole(SQLModel, table=True):
-    """
-    User role mapping table (many-to-many: User to Roles).
-
-    Matches schema:
-    - user_id: Foreign key to user
-    - role: User or Admin
-    - Composite primary key (user_id, role)
-    """
-    __tablename__ = "user_role"
-
-    user_id: UUID = Field(
-        foreign_key="user.user_id",
-        primary_key=True,
-        ondelete="CASCADE"
-    )
-    role: str = Field(
-        max_length=10,
-        nullable=False,
-        primary_key=True
-    )
-
-    # Relationships
-    # user: Optional[User] = Relationship(back_populates="roles")

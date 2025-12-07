@@ -95,8 +95,7 @@ async def get_current_active_user(
 
 
 async def require_admin(
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
+    current_user: User = Depends(get_current_user)
 ) -> User:
     """
     Require user to have Admin role.
@@ -110,9 +109,7 @@ async def require_admin(
             # Only admins can access this
             ...
     """
-    roles = await AuthService.get_user_roles(current_user.user_id, session)
-
-    if USER_ROLE_ADMIN not in roles:
+    if current_user.role != USER_ROLE_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
