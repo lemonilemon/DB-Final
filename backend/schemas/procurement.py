@@ -168,14 +168,12 @@ class MessageResponse(BaseModel):
 # ============================================================================
 
 class IngredientAvailability(BaseModel):
-    """Availability status for a single ingredient."""
+    """Availability status for a single ingredient (only returned if insufficient)."""
     ingredient_id: int
     ingredient_name: str
     standard_unit: str
-    required_quantity: Decimal
-    available_quantity: Decimal
-    is_sufficient: bool
-    shortage: Decimal  # How much is missing (0 if sufficient)
+    shortage: Decimal  # Minimum amount needed to fix entire timeline
+    needed_by: date  # Earliest date when shortage occurs (order must arrive before this)
 
     class Config:
         from_attributes = True

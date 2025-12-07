@@ -612,16 +612,16 @@ class ProcurementService:
             consumption_events.sort(key=lambda x: x[0])
 
             # Simulate timeline with FIFO consumption
-            min_total_quantity = Decimal('Inf')
-            shortage_detected = Decimal(0)
+            current_quantity = Decimal(0)
+            min_quantity = Decimal(0)
+            first_shortage_date = None
 
             for event_date, quantity_to_consume in consumption_events:
                 # Remove expired batches before this event
                 batches = [[qty, exp] for qty, exp in batches if exp >= event_date]
 
                 # Calculate total available before consumption
-                total_before = sum(qty for qty, _ in batches)
-                min_total_quantity = min(min_total_quantity, total_before)
+                current_quantity = sum(qty for qty, _ in batches)
 
                 # Consume using FIFO (earliest expiry first)
                 remaining = quantity_to_consume
@@ -639,59 +639,41 @@ class ProcurementService:
                         new_batches.append([qty - remaining, exp])
                         remaining = Decimal(0)
 
-                # If we couldn't consume enough, record shortage
-                if remaining > 0:
-                    shortage_detected = max(shortage_detected, remaining)
-
                 batches = new_batches
 
-                # Track minimum quantity after consumption
-                total_after = sum(qty for qty, _ in batches)
-                min_total_quantity = min(min_total_quantity, total_after)
+                # Calculate quantity after consumption
+                current_quantity = sum(qty for qty, _ in batches)
 
-            # Determine if sufficient
-            is_sufficient = shortage_detected == 0
+                # If consumption failed (couldn't get enough), quantity goes negative
+                if remaining > 0:
+                    current_quantity -= remaining
 
-            # Calculate available (before consuming this recipe)
-            # Simulate again but exclude the last event (this recipe)
-            batches_check = [[item.quantity, item.expiry_date] for item in items]
-            for event_date, quantity_to_consume in consumption_events[:-1]:  # Exclude last event
-                batches_check = [[qty, exp] for qty, exp in batches_check if exp >= event_date]
-                remaining = quantity_to_consume
-                new_batches = []
-                for qty, exp in batches_check:
-                    if remaining <= 0:
-                        new_batches.append([qty, exp])
-                    elif qty <= remaining:
-                        remaining -= qty
-                    else:
-                        new_batches.append([qty - remaining, exp])
-                        remaining = Decimal(0)
-                batches_check = new_batches
+                # Track minimum quantity and when it first goes negative
+                if current_quantity < min_quantity:
+                    min_quantity = current_quantity
+                    if current_quantity < 0 and first_shortage_date is None:
+                        first_shortage_date = event_date
 
-            # Remove expired batches at needed_by
-            batches_check = [[qty, exp] for qty, exp in batches_check if exp >= needed_by]
-            available_at_needed_by = sum(qty for qty, _ in batches_check)
+            # Only add to missing ingredients if there's a shortage
+            if min_quantity < 0:
+                shortage = abs(min_quantity)
 
-            missing_ingredients.append(
-                IngredientAvailability(
-                    ingredient_id=ingredient.ingredient_id,
-                    ingredient_name=ingredient.name,
-                    standard_unit=ingredient.standard_unit,
-                    required_quantity=requirement.quantity_needed,
-                    available_quantity=max(Decimal(0), available_at_needed_by),
-                    is_sufficient=is_sufficient,
-                    shortage=shortage_detected
+                missing_ingredients.append(
+                    IngredientAvailability(
+                        ingredient_id=ingredient.ingredient_id,
+                        ingredient_name=ingredient.name,
+                        standard_unit=ingredient.standard_unit,
+                        shortage=shortage,
+                        needed_by=first_shortage_date
+                    )
                 )
-            )
 
-        all_available = all(ing.is_sufficient for ing in missing_ingredients)
-        insufficient_count = sum(1 for ing in missing_ingredients if not ing.is_sufficient)
+        all_available = len(missing_ingredients) == 0
 
         return AvailabilityCheckResponse(
             all_available=all_available,
             missing_ingredients=missing_ingredients,
-            message=f"All ingredients available" if all_available else f"{insufficient_count} ingredient(s) insufficient"
+            message=f"All ingredients available" if all_available else f"{len(missing_ingredients)} ingredient(s) insufficient"
         )
 
     @staticmethod
