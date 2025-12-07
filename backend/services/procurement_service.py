@@ -9,7 +9,8 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.procurement import Partner, ExternalProduct, ShoppingListItem, StoreOrder, OrderItem
-from models.inventory import Ingredient
+from models.inventory import Ingredient, FridgeItem
+from models.recipe import Recipe, RecipeRequirement, MealPlan
 from schemas.procurement import (
     PartnerCreateRequest,
     PartnerResponse,
@@ -21,6 +22,11 @@ from schemas.procurement import (
     OrderItemResponse,
     CreateOrdersResponse,
     OrderUpdateStatusRequest,
+    AvailabilityCheckResponse,
+    IngredientAvailability,
+    ProductRecommendation,
+    ProductRecommendationsResponse,
+    CreateOrderRequest,
 )
 from core.config import ORDER_STATUS_PENDING
 
@@ -500,3 +506,454 @@ class ProcurementService:
         order.order_status = request.order_status
         session.add(order)
         await session.commit()
+
+    # ========================================================================
+    # Availability Check
+    # ========================================================================
+
+    @staticmethod
+    async def check_recipe_availability(
+        recipe_id: int,
+        fridge_id: UUID,
+        needed_by: date,
+        session: AsyncSession
+    ) -> AvailabilityCheckResponse:
+        """
+        Check if ingredients are available for a recipe using timeline simulation.
+
+        Algorithm (O(N log N) per ingredient):
+        1. Collect all events (inventory additions, expirations, meal plans)
+        2. Sort events by date
+        3. Simulate timeline chronologically
+        4. Check if quantity goes negative at any point
+
+        Considers events within 14 days for simplicity.
+        """
+        # Get recipe requirements
+        requirements_result = await session.execute(
+            select(RecipeRequirement, Ingredient)
+            .join(Ingredient, RecipeRequirement.ingredient_id == Ingredient.ingredient_id)
+            .where(RecipeRequirement.recipe_id == recipe_id)
+        )
+        requirements = requirements_result.all()
+
+        if not requirements:
+            raise HTTPException(status_code=404, detail="Recipe not found or has no requirements")
+
+        # Get all users who have access to this fridge
+        from models.fridge import FridgeAccess
+
+        fridge_users_result = await session.execute(
+            select(FridgeAccess.user_id)
+            .where(FridgeAccess.fridge_id == fridge_id)
+        )
+        fridge_user_ids = [row[0] for row in fridge_users_result.all()]
+
+        # Get meal plans within 14 days
+        today = date.today()
+        cutoff_date = today + timedelta(days=14)
+
+        meal_plans_result = await session.execute(
+            select(MealPlan)
+            .where(
+                and_(
+                    MealPlan.user_id.in_(fridge_user_ids),
+                    MealPlan.planned_date >= datetime.combine(today, datetime.min.time()),
+                    MealPlan.planned_date <= datetime.combine(cutoff_date, datetime.max.time())
+                )
+            )
+        )
+        meal_plans = meal_plans_result.scalars().all()
+
+        missing_ingredients = []
+
+        for requirement, ingredient in requirements:
+            # Get current fridge items (batches with quantities and expiry dates)
+            items_result = await session.execute(
+                select(FridgeItem)
+                .where(
+                    and_(
+                        FridgeItem.fridge_id == fridge_id,
+                        FridgeItem.ingredient_id == requirement.ingredient_id,
+                        FridgeItem.expiry_date >= today
+                    )
+                )
+                .order_by(FridgeItem.expiry_date.asc())  # Sort by expiry (for FIFO)
+            )
+            items = items_result.scalars().all()
+
+            # Initialize batches (list of [quantity, expiry_date])
+            batches = [[item.quantity, item.expiry_date] for item in items]
+
+            # Collect consumption events
+            consumption_events = []  # List of (date, quantity_to_consume)
+
+            # Event 1: Future meal plan consumptions
+            for meal_plan in meal_plans:
+                plan_req_result = await session.execute(
+                    select(RecipeRequirement)
+                    .where(
+                        and_(
+                            RecipeRequirement.recipe_id == meal_plan.recipe_id,
+                            RecipeRequirement.ingredient_id == requirement.ingredient_id
+                        )
+                    )
+                )
+                plan_req = plan_req_result.scalar_one_or_none()
+
+                if plan_req:
+                    plan_date = meal_plan.planned_date.date() if isinstance(meal_plan.planned_date, datetime) else meal_plan.planned_date
+                    consumption_events.append((plan_date, plan_req.quantity_needed))
+
+            # Event 2: This recipe's consumption at needed_by
+            consumption_events.append((needed_by, requirement.quantity_needed))
+
+            # Sort consumption events by date
+            consumption_events.sort(key=lambda x: x[0])
+
+            # Simulate timeline with FIFO consumption
+            min_total_quantity = Decimal('Inf')
+            shortage_detected = Decimal(0)
+
+            for event_date, quantity_to_consume in consumption_events:
+                # Remove expired batches before this event
+                batches = [[qty, exp] for qty, exp in batches if exp >= event_date]
+
+                # Calculate total available before consumption
+                total_before = sum(qty for qty, _ in batches)
+                min_total_quantity = min(min_total_quantity, total_before)
+
+                # Consume using FIFO (earliest expiry first)
+                remaining = quantity_to_consume
+                new_batches = []
+
+                for qty, exp in batches:
+                    if remaining <= 0:
+                        # No more to consume, keep this batch
+                        new_batches.append([qty, exp])
+                    elif qty <= remaining:
+                        # Consume entire batch
+                        remaining -= qty
+                    else:
+                        # Partially consume batch
+                        new_batches.append([qty - remaining, exp])
+                        remaining = Decimal(0)
+
+                # If we couldn't consume enough, record shortage
+                if remaining > 0:
+                    shortage_detected = max(shortage_detected, remaining)
+
+                batches = new_batches
+
+                # Track minimum quantity after consumption
+                total_after = sum(qty for qty, _ in batches)
+                min_total_quantity = min(min_total_quantity, total_after)
+
+            # Determine if sufficient
+            is_sufficient = shortage_detected == 0
+
+            # Calculate available (before consuming this recipe)
+            # Simulate again but exclude the last event (this recipe)
+            batches_check = [[item.quantity, item.expiry_date] for item in items]
+            for event_date, quantity_to_consume in consumption_events[:-1]:  # Exclude last event
+                batches_check = [[qty, exp] for qty, exp in batches_check if exp >= event_date]
+                remaining = quantity_to_consume
+                new_batches = []
+                for qty, exp in batches_check:
+                    if remaining <= 0:
+                        new_batches.append([qty, exp])
+                    elif qty <= remaining:
+                        remaining -= qty
+                    else:
+                        new_batches.append([qty - remaining, exp])
+                        remaining = Decimal(0)
+                batches_check = new_batches
+
+            # Remove expired batches at needed_by
+            batches_check = [[qty, exp] for qty, exp in batches_check if exp >= needed_by]
+            available_at_needed_by = sum(qty for qty, _ in batches_check)
+
+            missing_ingredients.append(
+                IngredientAvailability(
+                    ingredient_id=ingredient.ingredient_id,
+                    ingredient_name=ingredient.name,
+                    standard_unit=ingredient.standard_unit,
+                    required_quantity=requirement.quantity_needed,
+                    available_quantity=max(Decimal(0), available_at_needed_by),
+                    is_sufficient=is_sufficient,
+                    shortage=shortage_detected
+                )
+            )
+
+        all_available = all(ing.is_sufficient for ing in missing_ingredients)
+        insufficient_count = sum(1 for ing in missing_ingredients if not ing.is_sufficient)
+
+        return AvailabilityCheckResponse(
+            all_available=all_available,
+            missing_ingredients=missing_ingredients,
+            message=f"All ingredients available" if all_available else f"{insufficient_count} ingredient(s) insufficient"
+        )
+
+    @staticmethod
+    async def update_meal_plan_statuses(
+        fridge_id: UUID,
+        session: AsyncSession
+    ) -> None:
+        """
+        Update status of all meal plans for users with access to this fridge.
+
+        Status values:
+        - "Planned": >14 days away
+        - "Ready": All ingredients available (within 14 days)
+        - "Insufficient": Missing ingredients (within 14 days)
+        - "Finished": Already cooked (set manually)
+        - "Canceled": User canceled (set manually)
+        """
+        from models.fridge import FridgeAccess
+
+        # Get all users with access to this fridge
+        fridge_users_result = await session.execute(
+            select(FridgeAccess.user_id)
+            .where(FridgeAccess.fridge_id == fridge_id)
+        )
+        fridge_user_ids = [row[0] for row in fridge_users_result.all()]
+
+        # Get all meal plans for these users (excluding Finished and Canceled)
+        today = date.today()
+        cutoff_date = today + timedelta(days=14)
+
+        meal_plans_result = await session.execute(
+            select(MealPlan)
+            .where(
+                and_(
+                    MealPlan.user_id.in_(fridge_user_ids),
+                    MealPlan.status.not_in(["Finished", "Canceled"])
+                )
+            )
+        )
+        meal_plans = meal_plans_result.scalars().all()
+
+        # Update status for each meal plan
+        for plan in meal_plans:
+            plan_date = plan.planned_date.date() if isinstance(plan.planned_date, datetime) else plan.planned_date
+
+            # Check if planned date is >14 days away
+            if plan_date > cutoff_date:
+                plan.status = "Planned"
+            else:
+                # Check availability
+                try:
+                    availability = await ProcurementService.check_recipe_availability(
+                        recipe_id=plan.recipe_id,
+                        fridge_id=fridge_id,
+                        needed_by=plan_date,
+                        session=session
+                    )
+
+                    if availability.all_available:
+                        plan.status = "Ready"
+                    else:
+                        plan.status = "Insufficient"
+                except:
+                    # If recipe not found or other error, mark as Planned
+                    plan.status = "Planned"
+
+            session.add(plan)
+
+        await session.commit()
+
+    # ========================================================================
+    # Product Recommendations
+    # ========================================================================
+
+    @staticmethod
+    async def get_product_recommendations(
+        ingredient_id: int,
+        quantity_needed: Decimal,
+        needed_by: date,
+        session: AsyncSession
+    ) -> ProductRecommendationsResponse:
+        """
+        Get product recommendations for an ingredient with delivery validation.
+
+        Returns all products that sell this ingredient, with:
+        - Expected arrival date (today + avg_shipping_days)
+        - Whether it arrives in time (expected_arrival <= needed_by)
+        - Cheapest option that arrives in time
+        """
+        # Get ingredient
+        ingredient_result = await session.execute(
+            select(Ingredient).where(Ingredient.ingredient_id == ingredient_id)
+        )
+        ingredient = ingredient_result.scalar_one_or_none()
+
+        if not ingredient:
+            raise HTTPException(status_code=404, detail="Ingredient not found")
+
+        # Get all products for this ingredient
+        products_result = await session.execute(
+            select(ExternalProduct, Partner)
+            .join(Partner, ExternalProduct.partner_id == Partner.partner_id)
+            .where(ExternalProduct.ingredient_id == ingredient_id)
+            .order_by(ExternalProduct.current_price.asc())  # Cheapest first
+        )
+        products = products_result.all()
+
+        if not products:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No products available for ingredient '{ingredient.name}'"
+            )
+
+        # Build recommendations - only include products that arrive in time
+        today = date.today()
+        recommendations = []
+
+        for product, partner in products:
+            expected_arrival = today + timedelta(days=partner.avg_shipping_days)
+
+            # Only include if it arrives in time
+            if expected_arrival <= needed_by:
+                recommendations.append(
+                    ProductRecommendation(
+                        external_sku=product.external_sku,
+                        partner_id=partner.partner_id,
+                        partner_name=partner.partner_name,
+                        product_name=product.product_name,
+                        current_price=product.current_price,
+                        selling_unit=product.selling_unit,
+                        avg_shipping_days=partner.avg_shipping_days,
+                        expected_arrival=expected_arrival
+                    )
+                )
+
+        if not recommendations:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No products can arrive by {needed_by} for {ingredient.name}"
+            )
+
+        return ProductRecommendationsResponse(
+            ingredient_id=ingredient_id,
+            ingredient_name=ingredient.name,
+            quantity_needed=quantity_needed,
+            needed_by=needed_by,
+            products=recommendations,
+            message=f"Found {len(recommendations)} product(s) that arrive by {needed_by}"
+        )
+
+    # ========================================================================
+    # User-Selected Order Creation
+    # ========================================================================
+
+    @staticmethod
+    async def create_order(
+        request: CreateOrderRequest,
+        current_user_id: UUID,
+        session: AsyncSession
+    ) -> OrderResponse:
+        """
+        Create an order with user-selected products (frontend-driven).
+
+        Unlike create_orders_from_shopping_list which auto-selects cheapest,
+        this accepts explicit product selections from the user/frontend.
+        """
+        from services.fridge_service import FridgeService
+
+        # Check fridge access
+        await FridgeService._check_fridge_access(
+            request.fridge_id, current_user_id, session
+        )
+
+        if not request.items:
+            raise HTTPException(status_code=400, detail="Order must have at least one item")
+
+        # Get all products and validate
+        products_map = {}  # sku -> (product, partner)
+        for item in request.items:
+            product_result = await session.execute(
+                select(ExternalProduct, Partner)
+                .join(Partner, ExternalProduct.partner_id == Partner.partner_id)
+                .where(ExternalProduct.external_sku == item.external_sku)
+            )
+            product_row = product_result.one_or_none()
+
+            if not product_row:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product '{item.external_sku}' not found"
+                )
+
+            products_map[item.external_sku] = product_row
+
+        # All products must be from the same partner
+        partners = set(partner.partner_id for _, partner in products_map.values())
+        if len(partners) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="All products in an order must be from the same partner"
+            )
+
+        # Get the partner
+        _, partner = list(products_map.values())[0]
+
+        # Calculate total price
+        total_price = Decimal(0)
+        for item in request.items:
+            product, _ = products_map[item.external_sku]
+            total_price += product.current_price * item.quantity
+
+        # Calculate expected arrival
+        expected_arrival = date.today() + timedelta(days=partner.avg_shipping_days)
+
+        # Create StoreOrder
+        new_order = StoreOrder(
+            user_id=current_user_id,
+            partner_id=partner.partner_id,
+            order_date=datetime.utcnow(),
+            expected_arrival=expected_arrival,
+            total_price=total_price,
+            order_status=ORDER_STATUS_PENDING
+        )
+        session.add(new_order)
+        await session.flush()  # Get order_id
+
+        # Create OrderItems
+        order_items_responses = []
+        for item in request.items:
+            product, _ = products_map[item.external_sku]
+
+            order_item = OrderItem(
+                order_id=new_order.order_id,
+                external_sku=item.external_sku,
+                partner_id=partner.partner_id,
+                quantity=item.quantity,
+                deal_price=product.current_price  # Price snapshot
+            )
+            session.add(order_item)
+
+            order_items_responses.append(
+                OrderItemResponse(
+                    external_sku=product.external_sku,
+                    product_name=product.product_name,
+                    partner_name=partner.partner_name,
+                    quantity=item.quantity,
+                    deal_price=product.current_price,
+                    subtotal=product.current_price * item.quantity
+                )
+            )
+
+        await session.commit()
+        await session.refresh(new_order)
+
+        return OrderResponse(
+            order_id=new_order.order_id,
+            user_id=new_order.user_id,
+            partner_id=new_order.partner_id,
+            partner_name=partner.partner_name,
+            order_date=new_order.order_date,
+            expected_arrival=new_order.expected_arrival,
+            total_price=new_order.total_price,
+            order_status=new_order.order_status,
+            items=order_items_responses
+        )

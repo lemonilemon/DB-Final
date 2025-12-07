@@ -176,6 +176,12 @@ class MealPlan(SQLModel, table=True):
     - user_id: Foreign key to user
     - recipe_id: Foreign key to recipe
     - planned_date: When user plans to cook
+    - status: Meal plan status
+      - "Planned": Too far in future (>14 days)
+      - "Ready": All ingredients available
+      - "Insufficient": Missing ingredients
+      - "Finished": Recipe has been cooked
+      - "Canceled": User canceled the plan
     """
     __tablename__ = "meal_plan"
 
@@ -195,6 +201,11 @@ class MealPlan(SQLModel, table=True):
     )
     planned_date: datetime = Field(
         nullable=False
+    )
+    status: str = Field(
+        max_length=30,
+        nullable=False,
+        default="Planned"
     )
 
     # Relationships

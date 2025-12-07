@@ -422,7 +422,8 @@ class RecipeService:
                     user_id=plan.user_id,
                     recipe_id=plan.recipe_id,
                     recipe_name=recipe.recipe_name,
-                    planned_date=plan.planned_date.date()
+                    planned_date=plan.planned_date.date(),
+                    status=plan.status
                 )
             )
 

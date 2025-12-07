@@ -164,6 +164,7 @@ class MealPlanResponse(BaseModel):
     recipe_id: int
     recipe_name: str
     planned_date: date
+    status: str
 
     class Config:
         from_attributes = True

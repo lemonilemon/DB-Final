@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
@@ -17,6 +19,9 @@ from schemas.procurement import (
     CreateOrdersResponse,
     OrderUpdateStatusRequest,
     MessageResponse,
+    AvailabilityCheckResponse,
+    ProductRecommendationsResponse,
+    CreateOrderRequest,
 )
 from services.procurement_service import ProcurementService
 
@@ -120,6 +125,79 @@ async def list_products(
     )
 
 
+@product_router.get(
+    "/recommendations",
+    response_model=ProductRecommendationsResponse,
+    summary="Get product recommendations with delivery validation"
+)
+async def get_product_recommendations(
+    ingredient_id: int = Query(..., description="Ingredient to buy"),
+    quantity_needed: Decimal = Query(..., gt=0, description="Quantity needed"),
+    needed_by: date = Query(..., description="Date when ingredient is needed"),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Get product recommendations for an ingredient with delivery date validation.
+
+    **Returns:**
+    - All products that sell this ingredient
+    - Expected arrival date (today + avg_shipping_days)
+    - Whether each product arrives in time (expected_arrival <= needed_by)
+    - Recommended option (cheapest that arrives in time)
+
+    **Example:**
+    - Need 500ml milk by Dec 15
+    - FreshMart: $45, arrives Dec 9 (2 days) ✓ In time
+    - SuperStore: $42, arrives Dec 10 (3 days) ✓ In time (RECOMMENDED - cheapest)
+    - SlowMart: $40, arrives Dec 20 (13 days) ✗ Too late
+    """
+    return await ProcurementService.get_product_recommendations(
+        ingredient_id, quantity_needed, needed_by, session
+    )
+
+
+# ============================================================================
+# Availability Check Router
+# ============================================================================
+
+availability_router = APIRouter(prefix="/api/availability", tags=["Availability Check"])
+
+
+@availability_router.get(
+    "/check",
+    response_model=AvailabilityCheckResponse,
+    summary="Check ingredient availability for recipe"
+)
+async def check_availability(
+    recipe_id: int = Query(..., description="Recipe to check"),
+    fridge_id: UUID = Query(..., description="Fridge to check"),
+    needed_by: date = Query(..., description="Date when ingredients are needed"),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Check if all ingredients for a recipe are available in the fridge.
+
+    **Considers:**
+    - Current fridge inventory
+    - Expiration dates (items expiring before needed_by are excluded)
+    - Future consumption (TODO: subtract ingredients from other meal plans)
+
+    **Use cases:**
+    - Frontend calls this when creating a meal plan
+    - Frontend calls this after consuming/removing items
+    - Shows what needs to be ordered
+
+    **Example:**
+    - Meal plan for Dec 15
+    - Recipe needs 500ml milk, 4 eggs
+    - Fridge has 200ml milk (expires Dec 12), 6 eggs (expires Dec 20)
+    - Result: Milk insufficient (need 300ml more)
+    """
+    return await ProcurementService.check_recipe_availability(
+        recipe_id, fridge_id, needed_by, session
+    )
+
+
 # ============================================================================
 # Shopping List Router
 # ============================================================================
@@ -199,35 +277,42 @@ order_router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
 
 @order_router.post(
-    "/create-from-list",
-    response_model=CreateOrdersResponse,
+    "",
+    response_model=OrderResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create orders from shopping list (SPLIT BY PARTNER)"
+    summary="Create order with user-selected products"
 )
-async def create_orders_from_shopping_list(
+async def create_order(
+    request: CreateOrderRequest,
     current_user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session)
 ):
     """
-    Convert shopping list into orders with **automatic split-by-partner logic**.
+    Create an order with user-selected products.
 
-    **How it works:**
-    1. For each ingredient in your shopping list, finds cheapest product
-    2. **Automatically groups products by partner**
-    3. **Creates one order per partner** (split orders!)
-    4. Saves price snapshots (deal_price)
-    5. Calculates delivery dates
-    6. Clears your shopping list
+    **Frontend-driven workflow:**
+    1. Frontend checks availability (GET /api/availability/check)
+    2. Frontend gets recommendations (GET /api/products/recommendations)
+    3. User selects which products to order
+    4. Frontend calls this endpoint with selected products
 
     **Example:**
-    - Shopping list: Milk, Eggs, Bread
-    - Milk cheapest at FreshMart
-    - Eggs & Bread cheapest at SuperStore
-    - **Result: 2 orders** (one to FreshMart, one to SuperStore)
+    ```json
+    {
+      "fridge_id": "123...",
+      "items": [
+        {"external_sku": "FM-MILK-1L", "quantity": 2},
+        {"external_sku": "SS-EGGS-12", "quantity": 1}
+      ]
+    }
+    ```
+
+    **Result:**
+    - Creates ONE order with all selected products
+    - Saves price snapshots (deal_price)
+    - Calculates expected delivery date
     """
-    return await ProcurementService.create_orders_from_shopping_list(
-        current_user_id, session
-    )
+    return await ProcurementService.create_order(request, current_user_id, session)
 
 
 @order_router.get(

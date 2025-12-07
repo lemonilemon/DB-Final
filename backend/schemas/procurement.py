@@ -161,3 +161,84 @@ class MessageResponse(BaseModel):
     """Generic message response."""
     message: str
     detail: Optional[str] = None
+
+
+# ============================================================================
+# Availability Check Schemas
+# ============================================================================
+
+class IngredientAvailability(BaseModel):
+    """Availability status for a single ingredient."""
+    ingredient_id: int
+    ingredient_name: str
+    standard_unit: str
+    required_quantity: Decimal
+    available_quantity: Decimal
+    is_sufficient: bool
+    shortage: Decimal  # How much is missing (0 if sufficient)
+
+    class Config:
+        from_attributes = True
+
+
+class AvailabilityCheckResponse(BaseModel):
+    """Response for ingredient availability check."""
+    all_available: bool
+    missing_ingredients: List[IngredientAvailability]
+    message: str
+
+
+# ============================================================================
+# Product Recommendation Schemas
+# ============================================================================
+
+class ProductRecommendation(BaseModel):
+    """Product recommendation (sorted by price, only shows products that arrive in time)."""
+    external_sku: str
+    partner_id: int
+    partner_name: str
+    product_name: str
+    current_price: Decimal
+    selling_unit: str
+    avg_shipping_days: int
+    expected_arrival: date  # order_date + avg_shipping_days
+
+    class Config:
+        from_attributes = True
+
+
+class ProductRecommendationsResponse(BaseModel):
+    """Response for product recommendations."""
+    ingredient_id: int
+    ingredient_name: str
+    quantity_needed: Decimal
+    needed_by: Optional[date]
+    products: List[ProductRecommendation]
+    message: str
+
+
+# ============================================================================
+# New Order Creation Schemas
+# ============================================================================
+
+class OrderItemCreateRequest(BaseModel):
+    """Request to add a product to order."""
+    external_sku: str
+    quantity: int = Field(..., gt=0)
+
+
+class CreateOrderRequest(BaseModel):
+    """Request to create order with user-selected products."""
+    fridge_id: UUID
+    items: List[OrderItemCreateRequest] = Field(..., min_items=1)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "fridge_id": "123e4567-e89b-12d3-a456-426614174000",
+                "items": [
+                    {"external_sku": "FM-MILK-1L", "quantity": 2},
+                    {"external_sku": "SS-EGGS-12", "quantity": 1}
+                ]
+            }
+        }

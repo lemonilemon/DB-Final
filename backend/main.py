@@ -50,7 +50,7 @@ app = FastAPI(
 from routers.auth import router as auth_router
 from routers.fridge import router as fridge_router
 from routers.inventory import ingredient_router, inventory_router
-from routers.procurement import partner_router, product_router, shopping_list_router, order_router
+from routers.procurement import partner_router, product_router, shopping_list_router, order_router, availability_router
 from routers.recipe import router as recipe_router, meal_plan_router
 from core.dependencies import get_current_active_user
 
@@ -63,6 +63,7 @@ app.include_router(partner_router)
 app.include_router(product_router)
 app.include_router(shopping_list_router)
 app.include_router(order_router)
+app.include_router(availability_router)
 app.include_router(recipe_router)
 app.include_router(meal_plan_router)
 
