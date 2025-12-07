@@ -46,12 +46,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add behavior tracking middleware
+from middleware.behavior_tracking import BehaviorTrackingMiddleware
+app.add_middleware(BehaviorTrackingMiddleware)
+
 # Import routers
 from routers.auth import router as auth_router
 from routers.fridge import router as fridge_router
 from routers.inventory import ingredient_router, inventory_router
 from routers.procurement import partner_router, product_router, shopping_list_router, order_router, availability_router
 from routers.recipe import router as recipe_router, meal_plan_router
+from routers.analytics import router as analytics_router
 from core.dependencies import get_current_active_user
 
 # Register routers
@@ -66,6 +71,7 @@ app.include_router(order_router)
 app.include_router(availability_router)
 app.include_router(recipe_router)
 app.include_router(meal_plan_router)
+app.include_router(analytics_router)
 
 
 @app.get("/")

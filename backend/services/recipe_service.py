@@ -25,6 +25,7 @@ from schemas.recipe import (
 )
 from services.inventory_service import InventoryService
 from services.fridge_service import FridgeService
+from services.behavior_service import BehaviorService
 
 
 class RecipeService:
@@ -127,7 +128,8 @@ class RecipeService:
     @staticmethod
     async def get_recipe_detail(
         recipe_id: int,
-        session: AsyncSession
+        session: AsyncSession,
+        current_user_id: Optional[UUID] = None
     ) -> RecipeDetailResponse:
         """Get detailed recipe with requirements and steps."""
         # Get recipe with owner
@@ -187,6 +189,19 @@ class RecipeService:
             ).where(RecipeReview.recipe_id == recipe_id)
         )
         avg_rating, review_count = rating_result.one()
+
+        # Log view action
+        if current_user_id:
+            await BehaviorService.log_user_action(
+                action_type="view_recipe",
+                user_id=current_user_id,
+                resource_type="recipe",
+                resource_id=str(recipe_id),
+                metadata={
+                    "recipe_name": recipe.recipe_name,
+                    "cooking_time": recipe.cooking_time
+                }
+            )
 
         return RecipeDetailResponse(
             recipe_id=recipe.recipe_id,
@@ -282,6 +297,19 @@ class RecipeService:
                 "unit": req.standard_unit,
                 "items_consumed": consume_result.items_consumed
             })
+
+        # Log cooking action
+        await BehaviorService.log_user_action(
+            action_type="cook_recipe",
+            user_id=current_user_id,
+            resource_type="recipe",
+            resource_id=str(recipe_id),
+            metadata={
+                "recipe_name": recipe_detail.recipe_name,
+                "fridge_id": str(request.fridge_id),
+                "ingredients_consumed": len(consumption_report)
+            }
+        )
 
         return CookRecipeResponse(
             recipe_name=recipe_detail.recipe_name,

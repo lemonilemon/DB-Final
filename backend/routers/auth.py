@@ -10,6 +10,7 @@ from schemas.auth import (
     MessageResponse
 )
 from services.auth_service import AuthService
+from services.behavior_service import BehaviorService
 
 router = APIRouter(
     prefix="/api/auth",
@@ -74,5 +75,15 @@ async def login(
     ```
     """
     token_response = await AuthService.authenticate_user(request, session)
+
+    # Log login action
+    await BehaviorService.log_user_action(
+        action_type="login",
+        user_id=token_response.user_id,
+        metadata={
+            "user_name": token_response.user_name,
+            "roles": token_response.roles
+        }
+    )
 
     return token_response

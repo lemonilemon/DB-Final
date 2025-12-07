@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from core.dependencies import get_current_user_id
+from core.dependencies import get_current_user_id, get_optional_user
+from models.user import User
 from schemas.recipe import (
     RecipeCreateRequest,
     RecipeBasicResponse,
@@ -20,6 +21,7 @@ from schemas.recipe import (
     MessageResponse,
 )
 from services.recipe_service import RecipeService
+from services.behavior_service import BehaviorService
 
 
 router = APIRouter(prefix="/api/recipes", tags=["Recipes"])
@@ -62,7 +64,8 @@ async def create_recipe(
 )
 async def list_recipes(
     search: Optional[str] = Query(None, description="Search by recipe name"),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: Optional[User] = Depends(get_optional_user)
 ):
     """
     Get all recipes with ratings.
@@ -71,7 +74,18 @@ async def list_recipes(
     - Shows average rating and review count
     - Optional search by name
     """
-    return await RecipeService.get_all_recipes(session, search)
+    results = await RecipeService.get_all_recipes(session, search)
+
+    # Log search if query was provided
+    if search and user:
+        await BehaviorService.log_search_query(
+            query_type="recipe",
+            query_text=search,
+            results_count=len(results),
+            user_id=user.user_id
+        )
+
+    return results
 
 
 @router.get(
@@ -81,7 +95,8 @@ async def list_recipes(
 )
 async def get_recipe(
     recipe_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: Optional[User] = Depends(get_optional_user)
 ):
     """
     Get detailed recipe with ingredients, steps, and ratings.
@@ -90,7 +105,8 @@ async def get_recipe(
     - Step-by-step cooking instructions
     - Average rating from reviews
     """
-    return await RecipeService.get_recipe_detail(recipe_id, session)
+    user_id = user.user_id if user else None
+    return await RecipeService.get_recipe_detail(recipe_id, session, user_id)
 
 
 @router.post(

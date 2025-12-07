@@ -24,6 +24,7 @@ from schemas.procurement import (
     CreateOrderRequest,
 )
 from services.procurement_service import ProcurementService
+from services.behavior_service import BehaviorService
 
 
 # ============================================================================
@@ -312,7 +313,24 @@ async def create_order(
     - Saves price snapshots (deal_price)
     - Calculates expected delivery date
     """
-    return await ProcurementService.create_order(request, current_user_id, session)
+    order = await ProcurementService.create_order(request, current_user_id, session)
+
+    # Log order creation
+    await BehaviorService.log_user_action(
+        action_type="create_order",
+        user_id=current_user_id,
+        resource_type="order",
+        resource_id=str(order.order_id),
+        metadata={
+            "partner_id": order.partner_id,
+            "partner_name": order.partner_name,
+            "total_price": str(order.total_price),
+            "items_count": len(order.items),
+            "fridge_id": str(request.fridge_id)
+        }
+    )
+
+    return order
 
 
 @order_router.get(

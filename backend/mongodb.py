@@ -89,6 +89,24 @@ async def init_mongo():
         await error_logs.create_index([("timestamp", -1)])
         await error_logs.create_index([("error_type", 1)])
 
+        # Behavior tracking collections (NEW)
+        user_behavior = db["user_behavior"]
+        await user_behavior.create_index("user_id")
+        await user_behavior.create_index("action_type")
+        await user_behavior.create_index("timestamp")
+        await user_behavior.create_index([("user_id", 1), ("timestamp", -1)])
+
+        api_usage = db["api_usage"]
+        await api_usage.create_index("endpoint")
+        await api_usage.create_index("user_id")
+        await api_usage.create_index("timestamp")
+        await api_usage.create_index([("endpoint", 1), ("timestamp", -1)])
+
+        search_queries = db["search_queries"]
+        await search_queries.create_index("user_id")
+        await search_queries.create_index("query_type")
+        await search_queries.create_index("timestamp")
+
         print("✅ MongoDB collections and indexes created!")
 
     except Exception as e:
