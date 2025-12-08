@@ -230,6 +230,7 @@ class ProductRecommendationsResponse(BaseModel):
 
 class OrderItemCreateRequest(BaseModel):
     """Request to add a product to order."""
+    partner_id: int
     external_sku: str
     quantity: int = Field(..., gt=0)
 
@@ -244,8 +245,8 @@ class CreateOrderRequest(BaseModel):
             "example": {
                 "fridge_id": "123e4567-e89b-12d3-a456-426614174000",
                 "items": [
-                    {"external_sku": "FM-MILK-1L", "quantity": 2},
-                    {"external_sku": "SS-EGGS-12", "quantity": 1}
+                    {"partner_id": 1, "external_sku": "MILK-1L", "quantity": 2},
+                    {"partner_id": 1, "external_sku": "EGGS-12", "quantity": 1}
                 ]
             }
         }

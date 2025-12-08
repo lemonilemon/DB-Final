@@ -11,6 +11,7 @@ from decimal import Decimal
 from faker import Faker
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 # Import database connection
 from database import init_db, async_session_maker
@@ -297,8 +298,10 @@ async def create_partners(session: AsyncSession, ingredients, num_partners=10):
         # Each partner sells 15-25 ingredients
         num_products = random.randint(15, 25)
         for ingredient in random.sample(ingredients, num_products):
-            # Include partner_id to ensure uniqueness
-            sku = f"P{partner.partner_id:02d}I{ingredient.ingredient_id:04d}"
+            # Generate realistic SKU based on ingredient name (partners can use their own SKU systems)
+            # Convert ingredient name to SKU-friendly format (uppercase, no spaces)
+            ingredient_sku_part = ingredient.name.upper().replace(" ", "-")
+            sku = f"{ingredient_sku_part}"
 
             # Generate realistic selling_unit and unit_quantity based on ingredient type
             if ingredient.standard_unit == "g":
@@ -351,12 +354,25 @@ async def create_orders(session: AsyncSession, users, partners, products, count=
         user = random.choice(users)
         partner = random.choice(partners)
 
+        # Get fridges that this user has access to
+        result = await session.execute(
+            text("SELECT fridge_id FROM fridge_access WHERE user_id = :user_id"),
+            {"user_id": user.user_id}
+        )
+        user_fridges = result.fetchall()
+
+        if not user_fridges:
+            continue  # Skip if user has no fridge access
+
+        fridge_id = random.choice(user_fridges)[0]
+
         order_date = datetime.now() - timedelta(days=random.randint(0, 90))
         expected_arrival = order_date.date() + timedelta(days=partner.avg_shipping_days)
 
         order = StoreOrder(
             user_id=user.user_id,
             partner_id=partner.partner_id,
+            fridge_id=fridge_id,
             order_date=order_date,
             expected_arrival=expected_arrival,
             total_price=Decimal("0"),

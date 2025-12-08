@@ -98,14 +98,17 @@ class ProcurementService:
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Ingredient not found")
 
-        # Check if SKU already exists
+        # Check if product with this composite key (partner_id, external_sku) already exists
         existing = await session.execute(
-            select(ExternalProduct).where(ExternalProduct.external_sku == request.external_sku)
+            select(ExternalProduct).where(
+                (ExternalProduct.partner_id == request.partner_id) &
+                (ExternalProduct.external_sku == request.external_sku)
+            )
         )
         if existing.scalar_one_or_none():
             raise HTTPException(
                 status_code=400,
-                detail=f"Product with SKU '{request.external_sku}' already exists"
+                detail=f"Product with SKU '{request.external_sku}' already exists for partner {request.partner_id}"
             )
 
         # Create product
@@ -454,7 +457,9 @@ class ProcurementService:
             # Get order items
             items_result = await session.execute(
                 select(OrderItem, ExternalProduct)
-                .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
+                .join(ExternalProduct,
+                      (OrderItem.partner_id == ExternalProduct.partner_id) &
+                      (OrderItem.external_sku == ExternalProduct.external_sku))
                 .where(OrderItem.order_id == order.order_id)
             )
             items = items_result.all()
@@ -859,22 +864,25 @@ class ProcurementService:
             raise HTTPException(status_code=400, detail="Order must have at least one item")
 
         # Get all products and validate
-        products_map = {}  # sku -> (product, partner)
+        products_map = {}  # (partner_id, sku) -> (product, partner)
         for item in request.items:
             product_result = await session.execute(
                 select(ExternalProduct, Partner)
                 .join(Partner, ExternalProduct.partner_id == Partner.partner_id)
-                .where(ExternalProduct.external_sku == item.external_sku)
+                .where(
+                    (ExternalProduct.partner_id == item.partner_id) &
+                    (ExternalProduct.external_sku == item.external_sku)
+                )
             )
             product_row = product_result.one_or_none()
 
             if not product_row:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Product '{item.external_sku}' not found"
+                    detail=f"Product '{item.external_sku}' not found for partner {item.partner_id}"
                 )
 
-            products_map[item.external_sku] = product_row
+            products_map[(item.partner_id, item.external_sku)] = product_row
 
         # All products must be from the same partner
         partners = set(partner.partner_id for _, partner in products_map.values())
@@ -890,7 +898,7 @@ class ProcurementService:
         # Calculate total price
         total_price = Decimal(0)
         for item in request.items:
-            product, _ = products_map[item.external_sku]
+            product, _ = products_map[(item.partner_id, item.external_sku)]
             total_price += product.current_price * item.quantity
 
         # Calculate expected arrival
@@ -900,6 +908,7 @@ class ProcurementService:
         new_order = StoreOrder(
             user_id=current_user_id,
             partner_id=partner.partner_id,
+            fridge_id=request.fridge_id,
             order_date=datetime.utcnow(),
             expected_arrival=expected_arrival,
             total_price=total_price,
@@ -911,7 +920,7 @@ class ProcurementService:
         # Create OrderItems
         order_items_responses = []
         for item in request.items:
-            product, _ = products_map[item.external_sku]
+            product, _ = products_map[(item.partner_id, item.external_sku)]
 
             order_item = OrderItem(
                 order_id=new_order.order_id,

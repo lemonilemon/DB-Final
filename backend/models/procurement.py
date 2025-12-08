@@ -50,8 +50,8 @@ class ExternalProduct(SQLModel, table=True):
     External product catalog - products sold by partners.
 
     Matches schema:
-    - external_sku: Product SKU (primary key)
-    - partner_id: Foreign key to partner
+    - partner_id: Foreign key to partner (composite primary key)
+    - external_sku: Product SKU (composite primary key)
     - ingredient_id: Link to internal ingredient
     - product_name: Display name (max 100 chars)
     - current_price: Current selling price
@@ -60,14 +60,15 @@ class ExternalProduct(SQLModel, table=True):
     """
     __tablename__ = "external_product"
 
+    partner_id: int = Field(
+        foreign_key="partner.partner_id",
+        primary_key=True,
+        nullable=False,
+        ondelete="RESTRICT"
+    )
     external_sku: str = Field(
         max_length=50,
         primary_key=True
-    )
-    partner_id: int = Field(
-        foreign_key="partner.partner_id",
-        nullable=False,
-        ondelete="RESTRICT"
     )
     ingredient_id: int = Field(
         foreign_key="ingredient.ingredient_id",
@@ -152,6 +153,7 @@ class StoreOrder(SQLModel, table=True):
     - order_id: BIGINT identity primary key
     - user_id: Foreign key to user
     - partner_id: Foreign key to partner (key for split orders)
+    - fridge_id: Foreign key to fridge (which fridge is this order for)
     - order_date: When order was placed
     - expected_arrival: Calculated delivery date
     - total_price: Order total
@@ -170,6 +172,11 @@ class StoreOrder(SQLModel, table=True):
     )
     partner_id: int = Field(
         foreign_key="partner.partner_id",
+        nullable=False,
+        ondelete="RESTRICT"
+    )
+    fridge_id: UUID = Field(
+        foreign_key="fridge.fridge_id",
         nullable=False,
         ondelete="RESTRICT"
     )
@@ -202,10 +209,12 @@ class OrderItem(SQLModel, table=True):
 
     Matches schema:
     - order_id: Foreign key to store_order (composite PK)
-    - external_sku: Foreign key to external_product (composite PK)
-    - partner_id: Foreign key to partner
+    - external_sku: Part of composite PK and composite FK to external_product
+    - partner_id: Part of composite FK to external_product (partner_id, external_sku)
     - quantity: Number of units ordered
     - deal_price: Price snapshot at order time
+
+    Note: Composite FK (partner_id, external_sku) -> external_product is enforced at DB level
     """
     __tablename__ = "order_item"
 
@@ -215,12 +224,9 @@ class OrderItem(SQLModel, table=True):
         ondelete="CASCADE"
     )
     external_sku: str = Field(
-        foreign_key="external_product.external_sku",
-        primary_key=True,
-        ondelete="RESTRICT"
+        primary_key=True
     )
     partner_id: int = Field(
-        foreign_key="partner.partner_id",
         nullable=False
     )
     quantity: int = Field(
