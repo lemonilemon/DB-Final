@@ -51,7 +51,8 @@ class ExternalProductCreateRequest(BaseModel):
     ingredient_id: int
     product_name: str = Field(..., max_length=100)
     current_price: Decimal = Field(..., gt=0)
-    selling_unit: str = Field(..., max_length=20, description="e.g., 'Bottle', 'Pack', '1L'")
+    selling_unit: str = Field(..., max_length=20, description="e.g., '1L Bottle', '6-Pack'")
+    unit_quantity: Decimal = Field(..., gt=0, description="Quantity in standard_unit per selling unit (e.g., 1000ml per bottle)")
 
     class Config:
         json_schema_extra = {
@@ -61,7 +62,8 @@ class ExternalProductCreateRequest(BaseModel):
                 "ingredient_id": 1,
                 "product_name": "Fresh Milk 1L",
                 "current_price": 4.99,
-                "selling_unit": "1L Bottle"
+                "selling_unit": "1L Bottle",
+                "unit_quantity": 1000
             }
         }
 
@@ -73,9 +75,11 @@ class ExternalProductResponse(BaseModel):
     partner_name: str
     ingredient_id: int
     ingredient_name: str
+    standard_unit: str
     product_name: str
     current_price: Decimal
     selling_unit: str
+    unit_quantity: Decimal
 
     class Config:
         from_attributes = True
@@ -89,12 +93,14 @@ class ShoppingListAddRequest(BaseModel):
     """Request model for adding item to shopping list."""
     ingredient_id: int
     quantity_to_buy: Decimal = Field(..., gt=0, description="Quantity in standard unit")
+    needed_by: Optional[date] = Field(None, description="Optional deadline for when ingredient is needed")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "ingredient_id": 1,
-                "quantity_to_buy": 2000
+                "quantity_to_buy": 2000,
+                "needed_by": "2025-12-15"
             }
         }
 
@@ -107,6 +113,7 @@ class ShoppingListItemResponse(BaseModel):
     standard_unit: str
     quantity_to_buy: Decimal
     added_date: date
+    needed_by: Optional[date]  # Optional deadline
     available_products: int  # Count of products offering this ingredient
 
     class Config:
@@ -198,6 +205,8 @@ class ProductRecommendation(BaseModel):
     product_name: str
     current_price: Decimal
     selling_unit: str
+    unit_quantity: Decimal
+    standard_unit: str
     avg_shipping_days: int
     expected_arrival: date  # order_date + avg_shipping_days
 

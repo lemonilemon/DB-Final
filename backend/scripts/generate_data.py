@@ -11,18 +11,24 @@ Usage:
 
 import asyncio
 import random
+import sys
+import os
+
+# Add parent directory to path to allow importing from backend root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 from faker import Faker
 
-from database import init_db, get_async_session_context
+from database import init_db, async_session_maker
 from models import (
-    User, UserRole, Fridge, FridgeAccess, Ingredient, FridgeItem,
+    User, Fridge, FridgeAccess, Ingredient, FridgeItem,
     Partner, ExternalProduct, ShoppingListItem, StoreOrder, OrderItem,
     Recipe, RecipeRequirement, RecipeStep, RecipeReview, MealPlan
 )
-from core.security import get_password_hash
+from core.security import hash_password
 
 fake = Faker()
 
@@ -46,7 +52,7 @@ CATEGORIES = [
     "Condiments", "Beverages", "Snacks", "Frozen", "Bakery"
 ]
 
-UNITS = ["ml", "g", "unit", "kg", "L", "oz", "lb", "piece"]
+UNITS = ["ml", "g", "pcs"]
 
 INGREDIENT_NAMES = [
     # Dairy
@@ -98,18 +104,31 @@ async def generate_users(session):
     print(f"Generating {NUM_USERS} users...")
     users = []
 
-    # Create general role
-    general_role = UserRole(role_name="General User")
-    session.add(general_role)
-    await session.flush()
+    # 1. Create specific Test Admin
+    test_admin = User(
+        user_id=uuid4(),
+        user_name="admin",
+        email="admin@example.com",
+        password=hash_password("admin"),
+        status="Active",
+        role="Admin"
+    )
+    session.add(test_admin)
+    users.append(test_admin)
+    print("  Created test admin user (admin/admin)")
 
-    for i in range(NUM_USERS):
+    # 2. Generate remaining users
+    for i in range(NUM_USERS - 1):
+        # First 4 random users are also admins (Total 5 admins)
+        role = "Admin" if i < 4 else "User"
+        
         user = User(
             user_id=uuid4(),
-            user_name=fake.user_name() + str(i),  # Ensure unique
-            email=fake.email(),
-            password=get_password_hash("password123"),  # Same password for testing
-            status="Active"
+            user_name=f"{fake.user_name()[:12]}_{uuid4().hex[:6]}",  # Ensure unique and < 20 chars
+            email=f"{uuid4().hex[:6]}_{fake.email()}",  # Ensure unique
+            password=hash_password("password123"),  # Same password for testing
+            status="Active",
+            role=role
         )
         session.add(user)
         users.append(user)
@@ -132,12 +151,13 @@ async def generate_ingredients(session):
         if i < len(INGREDIENT_NAMES):
             name = INGREDIENT_NAMES[i]
         else:
-            name = f"{fake.word().capitalize()} {random.choice(['Mix', 'Blend', 'Special', 'Fresh'])}"
+            name = f"{fake.word().capitalize()} {random.choice(['Mix', 'Blend', 'Special', 'Fresh'])} {i}"
 
         ingredient = Ingredient(
             name=name,
             standard_unit=random.choice(UNITS),
-            category=random.choice(CATEGORIES)
+            # category=random.choice(CATEGORIES), # 'category' field might not exist in SQLModel, checking context
+            shelf_life_days=random.randint(3, 365)
         )
         session.add(ingredient)
         ingredients.append(ingredient)
@@ -512,8 +532,32 @@ async def generate_orders(session, users, partners, products):
     return orders
 
 
+import argparse
+from sqlalchemy import select
+
+# ... (imports remain the same)
+
 async def main():
     """Generate all data"""
+    parser = argparse.ArgumentParser(description="Generate test data for NEW Fridge")
+    parser.add_argument("--all", action="store_true", help="Generate all data")
+    parser.add_argument("--users", action="store_true", help="Generate users")
+    parser.add_argument("--ingredients", action="store_true", help="Generate ingredients")
+    parser.add_argument("--fridges", action="store_true", help="Generate fridges")
+    parser.add_argument("--fridge-items", action="store_true", help="Generate fridge items")
+    parser.add_argument("--recipes", action="store_true", help="Generate recipes")
+    parser.add_argument("--reviews", action="store_true", help="Generate reviews")
+    parser.add_argument("--meal-plans", action="store_true", help="Generate meal plans")
+    parser.add_argument("--partners", action="store_true", help="Generate partners")
+    parser.add_argument("--products", action="store_true", help="Generate products")
+    parser.add_argument("--orders", action="store_true", help="Generate orders")
+    
+    args = parser.parse_args()
+    
+    # If no specific args and not --all, default to --all
+    if not any(vars(args).values()):
+        args.all = True
+
     print("=" * 60)
     print("NEW Fridge Data Generation Script")
     print("=" * 60)
@@ -522,26 +566,66 @@ async def main():
     # Initialize database
     await init_db()
 
-    async with get_async_session_context() as session:
-        # Generate data in order (respecting foreign keys)
-        users = await generate_users(session)
-        ingredients = await generate_ingredients(session)
-        fridges = await generate_fridges(session, users)
+    async with async_session_maker() as session:
+        # 1. Users
+        if args.all or args.users:
+            users = await generate_users(session)
+        else:
+            print("Fetching existing users...")
+            users = (await session.execute(select(User))).scalars().all()
+            if not users:
+                print("Warning: No users found. Skipping dependent generations.")
 
-        # LARGE TABLE 1: Fridge Items (50,000+)
-        await generate_fridge_items(session, fridges, ingredients)
+        # 2. Ingredients
+        if args.all or args.ingredients:
+            ingredients = await generate_ingredients(session)
+        else:
+            print("Fetching existing ingredients...")
+            ingredients = (await session.execute(select(Ingredient))).scalars().all()
 
-        recipes = await generate_recipes(session, users, ingredients)
+        # 3. Fridges (Needs Users)
+        if (args.all or args.fridges) and users:
+            fridges = await generate_fridges(session, users)
+        else:
+            print("Fetching existing fridges...")
+            fridges = (await session.execute(select(Fridge))).scalars().all()
 
-        # LARGE TABLE 2: Reviews (10,000+)
-        await generate_reviews(session, users, recipes)
+        # 4. Fridge Items (Needs Fridges, Ingredients)
+        if (args.all or args.fridge_items) and fridges and ingredients:
+            await generate_fridge_items(session, fridges, ingredients)
 
-        # LARGE TABLE 3: Meal Plans (20,000+)
-        await generate_meal_plans(session, users, recipes)
+        # 5. Recipes (Needs Users, Ingredients)
+        if (args.all or args.recipes) and users and ingredients:
+            recipes = await generate_recipes(session, users, ingredients)
+        else:
+            print("Fetching existing recipes...")
+            recipes = (await session.execute(select(Recipe))).scalars().all()
 
-        partners = await generate_partners(session)
-        products = await generate_products(session, partners, ingredients)
-        orders = await generate_orders(session, users, partners, products)
+        # 6. Reviews (Needs Users, Recipes)
+        if (args.all or args.reviews) and users and recipes:
+            await generate_reviews(session, users, recipes)
+
+        # 7. Meal Plans (Needs Users, Recipes)
+        if (args.all or args.meal_plans) and users and recipes:
+            await generate_meal_plans(session, users, recipes)
+
+        # 8. Partners
+        if args.all or args.partners:
+            partners = await generate_partners(session)
+        else:
+            print("Fetching existing partners...")
+            partners = (await session.execute(select(Partner))).scalars().all()
+
+        # 9. Products (Needs Partners, Ingredients)
+        if (args.all or args.products) and partners and ingredients:
+            products = await generate_products(session, partners, ingredients)
+        else:
+            print("Fetching existing products...")
+            products = (await session.execute(select(ExternalProduct))).scalars().all()
+
+        # 10. Orders (Needs Users, Partners, Products)
+        if (args.all or args.orders) and users and partners and products:
+            await generate_orders(session, users, partners, products)
 
         await session.commit()
 
@@ -549,18 +633,6 @@ async def main():
     print("=" * 60)
     print("✓ Data generation complete!")
     print("=" * 60)
-    print()
-    print("Summary:")
-    print(f"  Users:         {NUM_USERS:,}")
-    print(f"  Fridges:       {NUM_FRIDGES:,}")
-    print(f"  Ingredients:   {NUM_INGREDIENTS:,}")
-    print(f"  Fridge Items:  {NUM_FRIDGE_ITEMS:,} ⭐ LARGE TABLE")
-    print(f"  Recipes:       {NUM_RECIPES:,}")
-    print(f"  Reviews:       {NUM_REVIEWS:,} ⭐ LARGE TABLE")
-    print(f"  Meal Plans:    {NUM_MEAL_PLANS:,} ⭐ LARGE TABLE")
-    print(f"  Partners:      {NUM_PARTNERS:,}")
-    print(f"  Products:      {NUM_PRODUCTS:,}")
-    print(f"  Orders:        {NUM_ORDERS:,}")
     print()
 
 

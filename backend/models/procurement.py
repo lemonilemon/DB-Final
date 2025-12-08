@@ -55,7 +55,8 @@ class ExternalProduct(SQLModel, table=True):
     - ingredient_id: Link to internal ingredient
     - product_name: Display name (max 100 chars)
     - current_price: Current selling price
-    - selling_unit: Unit as sold (e.g., "Bottle", "Pack")
+    - selling_unit: Unit as sold (e.g., "1L Bottle", "6-Pack")
+    - unit_quantity: Quantity in standard_unit per selling unit (e.g., 1000ml per bottle)
     """
     __tablename__ = "external_product"
 
@@ -87,6 +88,13 @@ class ExternalProduct(SQLModel, table=True):
         max_length=20,
         nullable=False
     )
+    unit_quantity: Decimal = Field(
+        max_digits=10,
+        decimal_places=2,
+        nullable=False,
+        default=1,
+        gt=0
+    )
 
     # Relationships
     # partner: Optional[Partner] = Relationship(back_populates="external_products")
@@ -103,6 +111,7 @@ class ShoppingListItem(SQLModel, table=True):
     - ingredient_id: Foreign key to ingredient (composite PK)
     - quantity_to_buy: Desired quantity in standard_unit
     - added_date: When added to cart
+    - needed_by: Optional deadline for when ingredient is needed
     """
     __tablename__ = "shopping_list_item"
 
@@ -124,6 +133,10 @@ class ShoppingListItem(SQLModel, table=True):
     )
     added_date: date = Field(
         nullable=False
+    )
+    needed_by: Optional[date] = Field(
+        default=None,
+        nullable=True
     )
 
     # Relationships

@@ -157,9 +157,11 @@ class ProcurementService:
                     partner_name=partner.partner_name,
                     ingredient_id=product.ingredient_id,
                     ingredient_name=ingredient.name,
+                    standard_unit=ingredient.standard_unit,
                     product_name=product.product_name,
                     current_price=product.current_price,
-                    selling_unit=product.selling_unit
+                    selling_unit=product.selling_unit,
+                    unit_quantity=product.unit_quantity
                 )
             )
 
@@ -195,8 +197,10 @@ class ProcurementService:
         existing_item = existing.scalar_one_or_none()
 
         if existing_item:
-            # Update quantity
+            # Update quantity and needed_by
             existing_item.quantity_to_buy = request.quantity_to_buy
+            existing_item.needed_by = request.needed_by
+            existing_item.added_date = date.today()
             session.add(existing_item)
         else:
             # Create new
@@ -204,7 +208,8 @@ class ProcurementService:
                 user_id=current_user_id,
                 ingredient_id=request.ingredient_id,
                 quantity_to_buy=request.quantity_to_buy,
-                added_date=date.today()
+                added_date=date.today(),
+                needed_by=request.needed_by
             )
             session.add(new_item)
 
@@ -243,6 +248,7 @@ class ProcurementService:
                     standard_unit=ingredient.standard_unit,
                     quantity_to_buy=list_item.quantity_to_buy,
                     added_date=list_item.added_date,
+                    needed_by=list_item.needed_by,
                     available_products=product_count
                 )
             )
@@ -804,6 +810,8 @@ class ProcurementService:
                         product_name=product.product_name,
                         current_price=product.current_price,
                         selling_unit=product.selling_unit,
+                        unit_quantity=product.unit_quantity,
+                        standard_unit=ingredient.standard_unit,
                         avg_shipping_days=partner.avg_shipping_days,
                         expected_arrival=expected_arrival
                     )
