@@ -175,10 +175,11 @@ class StoreOrder(SQLModel, table=True):
         nullable=False,
         ondelete="RESTRICT"
     )
-    fridge_id: UUID = Field(
+    fridge_id: Optional[UUID] = Field(
+        default=None,
         foreign_key="fridge.fridge_id",
-        nullable=False,
-        ondelete="RESTRICT"
+        nullable=True,
+        ondelete="SET NULL"
     )
     order_date: datetime = Field(
         nullable=False

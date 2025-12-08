@@ -175,6 +175,7 @@ class MealPlan(SQLModel, table=True):
     - plan_id: BIGINT identity primary key
     - user_id: Foreign key to user
     - recipe_id: Foreign key to recipe
+    - fridge_id: Foreign key to fridge (which fridge is this meal for)
     - planned_date: When user plans to cook
     - status: Meal plan status
       - "Planned": Too far in future (>14 days)
@@ -199,6 +200,11 @@ class MealPlan(SQLModel, table=True):
         nullable=False,
         ondelete="CASCADE"
     )
+    fridge_id: UUID = Field(
+        foreign_key="fridge.fridge_id",
+        nullable=False,
+        ondelete="CASCADE"
+    )
     planned_date: datetime = Field(
         nullable=False
     )
@@ -211,3 +217,4 @@ class MealPlan(SQLModel, table=True):
     # Relationships
     # user: Optional["User"] = Relationship(back_populates="meal_plans")
     # recipe: Optional[Recipe] = Relationship(back_populates="meal_plans")
+    # fridge: Optional["Fridge"] = Relationship(back_populates="meal_plans")
