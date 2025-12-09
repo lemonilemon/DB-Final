@@ -406,10 +406,16 @@ class RecipeService:
         # Verify recipe exists
         await RecipeService.get_recipe_detail(request.recipe_id, session)
 
+        # Verify user has access to the fridge
+        await FridgeService._check_fridge_access(
+            request.fridge_id, current_user_id, session
+        )
+
         # Create meal plan
         new_plan = MealPlan(
             user_id=current_user_id,
             recipe_id=request.recipe_id,
+            fridge_id=request.fridge_id,
             planned_date=datetime.combine(request.planned_date, datetime.min.time())
         )
         session.add(new_plan)
@@ -422,15 +428,32 @@ class RecipeService:
     async def get_meal_plans(
         current_user_id: UUID,
         session: AsyncSession,
+        fridge_id: UUID = None,
         start_date: date = None,
         end_date: date = None
     ) -> List[MealPlanResponse]:
-        """Get user's meal plans with optional date filtering."""
+        """
+        Get user's meal plans with optional filtering.
+
+        - If fridge_id provided: verifies access and returns all plans for that fridge
+        - If no fridge_id: returns all plans across all user's accessible fridges
+        - Optional date range filtering
+        """
+        # Verify fridge access if fridge_id is specified
+        if fridge_id:
+            await FridgeService._check_fridge_access(
+                fridge_id, current_user_id, session
+            )
+
         query = (
             select(MealPlan, Recipe)
             .join(Recipe, MealPlan.recipe_id == Recipe.recipe_id)
             .where(MealPlan.user_id == current_user_id)
         )
+
+        # Filter by fridge if specified
+        if fridge_id:
+            query = query.where(MealPlan.fridge_id == fridge_id)
 
         if start_date:
             query = query.where(MealPlan.planned_date >= datetime.combine(start_date, datetime.min.time()))
@@ -450,6 +473,7 @@ class RecipeService:
                     user_id=plan.user_id,
                     recipe_id=plan.recipe_id,
                     recipe_name=recipe.recipe_name,
+                    fridge_id=plan.fridge_id,
                     planned_date=plan.planned_date.date(),
                     status=plan.status
                 )

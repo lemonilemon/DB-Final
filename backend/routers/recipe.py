@@ -225,6 +225,7 @@ async def create_meal_plan(
     summary="View meal plans"
 )
 async def get_meal_plans(
+    fridge_id: Optional[UUID] = Query(None, description="Filter by fridge"),
     start_date: Optional[date] = Query(None, description="Filter from date"),
     end_date: Optional[date] = Query(None, description="Filter to date"),
     current_user_id: UUID = Depends(get_current_user_id),
@@ -233,9 +234,10 @@ async def get_meal_plans(
     """
     Get your scheduled meals.
 
+    - Optional fridge filtering (all your fridges if not specified)
     - Optional date range filtering
     - Sorted by date (earliest first)
     """
     return await RecipeService.get_meal_plans(
-        current_user_id, session, start_date, end_date
+        current_user_id, session, fridge_id, start_date, end_date
     )

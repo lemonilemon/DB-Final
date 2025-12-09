@@ -154,6 +154,7 @@ class ReviewResponse(BaseModel):
 class MealPlanCreateRequest(BaseModel):
     """Request to create a meal plan."""
     recipe_id: int
+    fridge_id: UUID = Field(..., description="Which fridge this meal plan is for")
     planned_date: date
 
 
@@ -163,6 +164,7 @@ class MealPlanResponse(BaseModel):
     user_id: UUID
     recipe_id: int
     recipe_name: str
+    fridge_id: UUID
     planned_date: date
     status: str
 
