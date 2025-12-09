@@ -10,7 +10,7 @@ export const getShoppingList = async () => {
 // ➕ POST /api/shopping-list
 export const addShoppingItem = async (data) => {
   const payload = {
-    ingredient_id: data.ingredient_id,
+    ingredient_id: data.ingredient_id,  
     quantity_to_buy: data.quantity_to_buy,
     needed_by: data.needed_by ?? new Date().toISOString().slice(0, 10) // 若前端沒給就使用今天
   };
@@ -42,12 +42,12 @@ export const checkAvailability = async (recipeId, fridgeId, neededBy) => {
 // -------------------------------------------------------
 // ⭐ NEW: Product Recommendations
 // -------------------------------------------------------
-export const getRecommendations = async (ingredientId, qty, neededBy) => {
+export const getRecommendations = async (ingredient_id, quantity_needed, needed_by) => {
   const res = await api.get("/products/recommendations", {
     params: {
-      ingredient_id: ingredientId,
-      quantity_needed: qty,
-      needed_by: neededBy,
+      ingredient_id: ingredient_id,
+      quantity_needed: quantity_needed,
+      needed_by: needed_by,
     },
   });
   return res.data;

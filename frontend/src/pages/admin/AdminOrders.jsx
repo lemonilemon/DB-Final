@@ -1,99 +1,152 @@
 // src/pages/admin/AdminOrders.jsx
-import React, { useEffect, useState } from "react";
-import { getOrders, updateOrderStatus } from "../../api/orders";
 
-const STATUS_OPTIONS = [
-  "Pending",
-  "Processing",
-  "Shipped",
-  "Delivered",
-  "Cancelled",
-];
+import React, { useEffect, useState } from "react";
+import { getAllOrders, updateOrderStatus } from "../../api/admin";
+
+// 金額字串格式化（後端是 Decimal very long string）
+const formatPrice = (value) => {
+  if (!value) return "0";
+  try {
+    return Number(value).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return value; // 如果轉換失敗就原樣輸出
+  }
+};
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
-  const load = async () => {
+  // pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
+  const loadOrders = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      setError("");
-      const data = await getOrders(); // 目前登入 user 的訂單
+      const data = await getAllOrders();
       setOrders(data);
-    } catch (err) {
-      console.error("load orders failed:", err);
-      setError("無法載入訂單資料");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  const handleStatusChange = async (orderId, newStatus) => {
-    try {
-      await updateOrderStatus(orderId, { order_status: newStatus });
-      await load();
-    } catch (err) {
-      console.error("update status failed:", err);
-      setError("更新訂單狀態失敗");
-    }
+  const handleUpdate = async (orderId, newStatus) => {
+    await updateOrderStatus(orderId, newStatus);
+    alert("Order status updated!");
+    loadOrders();
   };
 
-  return (
-    <section>
-      <h2>訂單管理</h2>
-      <p className="muted">
-        目前後端 API 只提供「自己帳號的訂單」，所以這裡看到的是目前登入 Admin 的訂單。
-        如果要管理所有使用者的訂單，需要後端再另外開 admin 專用 endpoint。
-      </p>
+  // pagination calculation
+  const totalPages = Math.ceil(orders.length / pageSize);
+  const currentItems = orders.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
-      {error && <p className="error-text">{error}</p>}
+  return (
+    <div>
+      <h2>訂單管理</h2>
 
       {loading ? (
         <p>Loading...</p>
-      ) : orders.length === 0 ? (
-        <p>目前沒有任何訂單。</p>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Partner</th>
-              <th>Total</th>
-              <th>Status</th>
-              <th>Order Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.order_id}>
-                <td>{o.order_id}</td>
-                <td>{o.partner_name}</td>
-                <td>{o.total_price}</td>
-                <td>
-                  <select
-                    value={o.order_status}
-                    onChange={(e) =>
-                      handleStatusChange(o.order_id, e.target.value)
-                    }
-                  >
-                    {STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>{new Date(o.order_date).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          {currentItems.map((o) => (
+            <div key={o.order_id} className="card" style={{ marginBottom: 20 }}>
+              <h3>
+                訂單 #{o.order_id} —{" "}
+                <span style={{ color: "gray" }}>{o.order_status}</span>
+              </h3>
+
+              <p>
+                <strong>使用者：</strong> {o.user_id}
+              </p>
+
+              <p>
+                <strong>合作商：</strong> {o.partner_name}
+              </p>
+
+              <p>
+                <strong>下單時間：</strong>{" "}
+                {new Date(o.order_date).toLocaleString()}
+              </p>
+
+              <p>
+                <strong>預計到貨：</strong> {o.expected_arrival}
+              </p>
+
+              <p>
+                <strong>總金額：</strong> NT$ {formatPrice(o.total_price)}
+              </p>
+
+              {/* ---------- 訂單品項 ---------- */}
+              <h4>商品內容</h4>
+
+              {o.items.length === 0 ? (
+                <p className="muted">（沒有商品資訊）</p>
+              ) : (
+                <ul style={{ paddingLeft: 20 }}>
+                  {o.items.map((it, idx) => (
+                    <li key={idx} style={{ marginBottom: 6 }}>
+                      <strong>{it.product_name}</strong>  
+                      （x{it.quantity}）  
+                      — 小計 NT$ {formatPrice(it.subtotal)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* ---------- 修改狀態 ---------- */}
+              <div style={{ marginTop: 15 }}>
+                <label><strong>修改訂單狀態：</strong></label>
+                <br />
+                <select
+                  value={o.order_status}
+                  onChange={(e) => handleUpdate(o.order_id, e.target.value)}
+                  style={{ marginTop: 8 }}
+                >
+                  <option>Pending</option>
+                  <option>Processing</option>
+                  <option>Shipped</option>
+                  <option>Delivered</option>
+                  <option>Cancelled</option>
+                </select>
+              </div>
+            </div>
+          ))}
+
+          {/* ---------- Pagination Buttons ---------- */}
+          {totalPages > 1 && (
+            <div style={{ marginTop: 20 }}>
+              <button
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+              >
+                上一頁
+              </button>
+
+              <span style={{ margin: "0 12px" }}>
+                Page {currentPage} / {totalPages}
+              </span>
+
+              <button
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => p + 1)}
+              >
+                下一頁
+              </button>
+            </div>
+          )}
+        </>
       )}
-    </section>
+    </div>
   );
 }

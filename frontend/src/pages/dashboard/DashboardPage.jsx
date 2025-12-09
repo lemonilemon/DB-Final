@@ -56,6 +56,13 @@ export default function DashboardPage() {
             </div>
           </Link>
 
+          <Link to="/ingredients" className="card-link">
+            <div className="card">
+              <h2>🥦 Ingredients</h2>
+              <p>Browse all available ingredients.</p>
+            </div>
+          </Link>
+
           {/* <Link to="/meal-plans" className="card-link">
             <div className="card">
               <h2>📅 Meal Plans</h2>

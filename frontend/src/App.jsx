@@ -23,6 +23,8 @@ import MealPlansPage from "./pages/mealplan/MealPlanPage";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 
+import UserIngredients from "./pages/dashboard/UserIngredients";
+
 import { Outlet } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 
@@ -75,6 +77,9 @@ export default function App() {
 
           {/* Meal plans */}
           <Route path="/meal-plans" element={<MealPlansPage />} />
+
+          {/* Ingredient list */}
+          <Route path="/ingredients" element={<UserIngredients />} />
 
           {/* ------ admin bashboard test ------
           <Route

@@ -652,6 +652,7 @@ class ProcurementService:
                 fridge_id=order.fridge_id,
                 ingredient_id=product.ingredient_id,
                 quantity=standard_quantity,
+                entry_date=today,  # ⭐ 必加
                 expiry_date=expiry_date
             )
             session.add(fridge_item)
