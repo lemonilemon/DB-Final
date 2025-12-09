@@ -6,34 +6,27 @@ Focuses on core tables with high-quality, realistic data.
 
 import asyncio
 import random
+import sys
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
-
 from faker import Faker
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.security import hash_password
+# Add parent directory to Python path so we can import from backend root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 # Import database connection
-from database import async_session_maker, init_db
+from database import init_db, async_session_maker
+from core.security import hash_password
 
 # Import models
 from models import (
-    ExternalProduct,
-    Fridge,
-    FridgeAccess,
-    FridgeItem,
-    Ingredient,
-    MealPlan,
-    OrderItem,
-    Partner,
-    Recipe,
-    RecipeRequirement,
-    RecipeReview,
-    RecipeStep,
-    StoreOrder,
-    User,
+    User, Fridge, FridgeAccess, Ingredient, FridgeItem,
+    Partner, ExternalProduct, StoreOrder, OrderItem,
+    Recipe, RecipeRequirement, RecipeStep, RecipeReview, MealPlan
 )
 
 # Initialize Faker
@@ -42,52 +35,31 @@ fake = Faker()
 # Real ingredient data
 INGREDIENTS = [
     # Vegetables
-    ("Tomato", "g", 7),
-    ("Onion", "g", 14),
-    ("Carrot", "g", 14),
-    ("Potato", "g", 21),
-    ("Lettuce", "g", 7),
-    ("Cucumber", "g", 7),
-    ("Bell Pepper", "g", 7),
-    ("Broccoli", "g", 7),
-    ("Spinach", "g", 5),
-    ("Cabbage", "g", 14),
-    ("Garlic", "g", 30),
-    ("Ginger", "g", 21),
+    ("Tomato", "g", 7), ("Onion", "g", 14), ("Carrot", "g", 14),
+    ("Potato", "g", 21), ("Lettuce", "g", 7), ("Cucumber", "g", 7),
+    ("Bell Pepper", "g", 7), ("Broccoli", "g", 7), ("Spinach", "g", 5),
+    ("Cabbage", "g", 14), ("Garlic", "g", 30), ("Ginger", "g", 21),
+
     # Fruits
-    ("Apple", "pcs", 14),
-    ("Banana", "pcs", 7),
-    ("Orange", "pcs", 10),
-    ("Grape", "g", 7),
-    ("Strawberry", "g", 5),
-    ("Lemon", "pcs", 21),
+    ("Apple", "pcs", 14), ("Banana", "pcs", 7), ("Orange", "pcs", 10),
+    ("Grape", "g", 7), ("Strawberry", "g", 5), ("Lemon", "pcs", 21),
+
     # Dairy
-    ("Milk", "ml", 7),
-    ("Cheese", "g", 21),
-    ("Yogurt", "ml", 14),
-    ("Butter", "g", 30),
-    ("Eggs", "pcs", 21),
-    ("Cream", "ml", 7),
+    ("Milk", "ml", 7), ("Cheese", "g", 21), ("Yogurt", "ml", 14),
+    ("Butter", "g", 30), ("Eggs", "pcs", 21), ("Cream", "ml", 7),
+
     # Meat & Seafood
-    ("Chicken Breast", "g", 2),
-    ("Pork Chop", "g", 2),
-    ("Beef Steak", "g", 3),
-    ("Ground Beef", "g", 2),
-    ("Salmon", "g", 2),
-    ("Shrimp", "g", 2),
+    ("Chicken Breast", "g", 2), ("Pork Chop", "g", 2),
+    ("Beef Steak", "g", 3), ("Ground Beef", "g", 2),
+    ("Salmon", "g", 2), ("Shrimp", "g", 2),
+
     # Grains & Staples
-    ("Rice", "g", 365),
-    ("Pasta", "g", 365),
-    ("Bread", "pcs", 7),
-    ("Flour", "g", 180),
-    ("Noodles", "g", 365),
+    ("Rice", "g", 365), ("Pasta", "g", 365), ("Bread", "pcs", 7),
+    ("Flour", "g", 180), ("Noodles", "g", 365),
+
     # Condiments
-    ("Salt", "g", 365),
-    ("Pepper", "g", 365),
-    ("Sugar", "g", 365),
-    ("Soy Sauce", "ml", 365),
-    ("Olive Oil", "ml", 365),
-    ("Vinegar", "ml", 365),
+    ("Salt", "g", 365), ("Pepper", "g", 365), ("Sugar", "g", 365),
+    ("Soy Sauce", "ml", 365), ("Olive Oil", "ml", 365), ("Vinegar", "ml", 365),
 ]
 
 # High Quality Handmade Recipes
@@ -103,8 +75,8 @@ HANDMADE_RECIPES = [
             "Melt butter in a non-stick pan over medium heat.",
             "Pour in the eggs and let them sit for a moment until the edges start to set.",
             "Gently push the eggs across the pan with a spatula to form soft curds.",
-            "Cook until the eggs are set but still moist. Serve immediately.",
-        ],
+            "Cook until the eggs are set but still moist. Serve immediately."
+        ]
     },
     {
         "name": "Spaghetti Carbonara",
@@ -117,23 +89,14 @@ HANDMADE_RECIPES = [
             "Drain the pasta, reserving some cooking water.",
             "Toss the hot pasta with the egg and cheese mixture quickly so the heat cooks the eggs without scrambling them.",
             "Add a splash of pasta water if needed to create a creamy sauce.",
-            "Serve immediately with extra cheese.",
-        ],
+            "Serve immediately with extra cheese."
+        ]
     },
     {
         "name": "Chicken Stir-Fry",
         "description": "A healthy and colorful stir-fry with fresh vegetables and tender chicken.",
         "time": 20,
-        "ingredients": {
-            "Chicken Breast": 300,
-            "Soy Sauce": 30,
-            "Garlic": 10,
-            "Ginger": 10,
-            "Bell Pepper": 100,
-            "Broccoli": 100,
-            "Carrot": 50,
-            "Olive Oil": 15,
-        },
+        "ingredients": {"Chicken Breast": 300, "Soy Sauce": 30, "Garlic": 10, "Ginger": 10, "Bell Pepper": 100, "Broccoli": 100, "Carrot": 50, "Olive Oil": 15},
         "steps": [
             "Slice chicken breast into thin strips.",
             "Chop broccoli, bell pepper, and carrot into bite-sized pieces.",
@@ -141,220 +104,143 @@ HANDMADE_RECIPES = [
             "Add chicken and stir-fry until browned and cooked through. Remove from pan.",
             "Add garlic, ginger, and vegetables to the pan. Stir-fry for 3-5 minutes.",
             "Return chicken to the pan, add soy sauce, and toss everything together.",
-            "Serve hot over rice.",
-        ],
+            "Serve hot over rice."
+        ]
     },
     {
         "name": "Garlic Butter Shrimp",
         "description": "Succulent shrimp cooked in a rich garlic butter sauce.",
         "time": 15,
-        "ingredients": {
-            "Shrimp": 300,
-            "Butter": 40,
-            "Garlic": 15,
-            "Lemon": 1,
-            "Salt": 3,
-            "Pepper": 2,
-        },
+        "ingredients": {"Shrimp": 300, "Butter": 40, "Garlic": 15, "Lemon": 1, "Salt": 3, "Pepper": 2},
         "steps": [
             "Peel and devein the shrimp.",
             "Melt butter in a skillet over medium heat.",
             "Add minced garlic and cook for 1 minute until fragrant.",
             "Add shrimp in a single layer and cook for 2-3 minutes per side until pink.",
             "Squeeze fresh lemon juice over the shrimp and season with salt and pepper.",
-            "Serve immediately.",
-        ],
+            "Serve immediately."
+        ]
     },
     {
         "name": "Hearty Beef Stew",
         "description": "A comforting beef stew with potatoes and carrots, perfect for cold days.",
         "time": 120,
-        "ingredients": {
-            "Beef Steak": 500,
-            "Potato": 300,
-            "Carrot": 200,
-            "Onion": 100,
-            "Garlic": 10,
-            "Salt": 5,
-            "Pepper": 3,
-            "Olive Oil": 20,
-        },
+        "ingredients": {"Beef Steak": 500, "Potato": 300, "Carrot": 200, "Onion": 100, "Garlic": 10, "Salt": 5, "Pepper": 3, "Olive Oil": 20},
         "steps": [
             "Cut beef into cubes and season with salt and pepper.",
             "Sear beef in a large pot with oil until browned. Remove beef.",
             "Sauté chopped onions and garlic in the same pot.",
             "Add beef back to the pot along with chopped potatoes and carrots.",
             "Cover with water or broth and bring to a simmer.",
-            "Cover and cook on low heat for 1.5 to 2 hours until beef is tender.",
-        ],
+            "Cover and cook on low heat for 1.5 to 2 hours until beef is tender."
+        ]
     },
     {
         "name": "Greek Salad",
         "description": "Fresh and crisp salad with cucumber, tomato, and tangy cheese.",
         "time": 10,
-        "ingredients": {
-            "Cucumber": 150,
-            "Tomato": 150,
-            "Onion": 30,
-            "Cheese": 50,
-            "Olive Oil": 20,
-            "Vinegar": 10,
-            "Salt": 2,
-        },
+        "ingredients": {"Cucumber": 150, "Tomato": 150, "Onion": 30, "Cheese": 50, "Olive Oil": 20, "Vinegar": 10, "Salt": 2},
         "steps": [
             "Chop cucumber and tomato into chunks.",
             "Slice onion thinly.",
             "Combine vegetables in a bowl.",
             "Crumble cheese over the top.",
             "Drizzle with olive oil and vinegar, sprinkle with salt.",
-            "Toss gently and serve.",
-        ],
+            "Toss gently and serve."
+        ]
     },
     {
         "name": "Fried Rice",
         "description": "The perfect way to use leftover rice. Savory and satisfying.",
         "time": 15,
-        "ingredients": {
-            "Rice": 400,
-            "Eggs": 2,
-            "Carrot": 50,
-            "Onion": 50,
-            "Soy Sauce": 20,
-            "Garlic": 5,
-            "Olive Oil": 15,
-        },
+        "ingredients": {"Rice": 400, "Eggs": 2, "Carrot": 50, "Onion": 50, "Soy Sauce": 20, "Garlic": 5, "Olive Oil": 15},
         "steps": [
             "Dice carrots and onions.",
             "Scramble eggs in a pan and set aside.",
             "Heat oil in the pan and sauté onions, carrots, and garlic.",
             "Add cooked rice (preferably cold) and stir-fry to break up clumps.",
             "Stir in soy sauce and cooked eggs.",
-            "Cook for another 2 minutes until everything is hot and well combined.",
-        ],
+            "Cook for another 2 minutes until everything is hot and well combined."
+        ]
     },
     {
         "name": "Oven Roasted Vegetables",
         "description": "Simple roasted vegetables that bring out their natural sweetness.",
         "time": 40,
-        "ingredients": {
-            "Potato": 200,
-            "Carrot": 200,
-            "Broccoli": 150,
-            "Bell Pepper": 100,
-            "Olive Oil": 30,
-            "Salt": 5,
-            "Pepper": 2,
-            "Garlic": 10,
-        },
+        "ingredients": {"Potato": 200, "Carrot": 200, "Broccoli": 150, "Bell Pepper": 100, "Olive Oil": 30, "Salt": 5, "Pepper": 2, "Garlic": 10},
         "steps": [
             "Preheat oven to 400°F (200°C).",
             "Chop all vegetables into similar-sized pieces.",
             "Toss vegetables in a bowl with olive oil, minced garlic, salt, and pepper.",
             "Spread in a single layer on a baking sheet.",
-            "Roast for 30-35 minutes, tossing halfway through, until tender and browned.",
-        ],
+            "Roast for 30-35 minutes, tossing halfway through, until tender and browned."
+        ]
     },
     {
         "name": "Grilled Salmon",
         "description": "Healthy and delicious salmon fillets with a lemon butter glaze.",
         "time": 20,
-        "ingredients": {
-            "Salmon": 300,
-            "Lemon": 1,
-            "Butter": 20,
-            "Salt": 3,
-            "Pepper": 2,
-            "Garlic": 5,
-        },
+        "ingredients": {"Salmon": 300, "Lemon": 1, "Butter": 20, "Salt": 3, "Pepper": 2, "Garlic": 5},
         "steps": [
             "Season salmon fillets with salt and pepper.",
             "Melt butter with minced garlic.",
             "Grill or pan-sear salmon for 4-5 minutes per side.",
             "Brush with garlic butter during the last minute of cooking.",
-            "Serve with lemon wedges.",
-        ],
+            "Serve with lemon wedges."
+        ]
     },
     {
         "name": "Spinach and Cheese Omelet",
         "description": "A protein-packed breakfast with fresh spinach.",
         "time": 12,
-        "ingredients": {
-            "Eggs": 3,
-            "Spinach": 50,
-            "Cheese": 30,
-            "Butter": 10,
-            "Salt": 1,
-            "Pepper": 1,
-        },
+        "ingredients": {"Eggs": 3, "Spinach": 50, "Cheese": 30, "Butter": 10, "Salt": 1, "Pepper": 1},
         "steps": [
             "Whisk eggs with salt and pepper.",
             "Sauté spinach in a pan with a little butter until wilted. Remove.",
             "Pour whisked eggs into the pan.",
             "When eggs are mostly set, add spinach and cheese to one half.",
-            "Fold the omelet over and cook for another minute until cheese melts.",
-        ],
+            "Fold the omelet over and cook for another minute until cheese melts."
+        ]
     },
     {
         "name": "Pork Chop with Apples",
         "description": "Savory pork chops paired with sweet cooked apples.",
         "time": 25,
-        "ingredients": {
-            "Pork Chop": 2,
-            "Apple": 2,
-            "Butter": 20,
-            "Salt": 5,
-            "Pepper": 3,
-            "Sugar": 5,
-        },
+        "ingredients": {"Pork Chop": 2, "Apple": 2, "Butter": 20, "Salt": 5, "Pepper": 3, "Sugar": 5},
         "steps": [
             "Season pork chops with salt and pepper.",
             "Sear chops in a skillet until cooked through. Remove and keep warm.",
             "Slice apples and add to the same skillet with butter and a pinch of sugar.",
             "Cook apples until soft and caramelized.",
-            "Serve pork chops topped with the apples.",
-        ],
+            "Serve pork chops topped with the apples."
+        ]
     },
     {
         "name": "Creamy Potato Soup",
         "description": "Rich and creamy soup, comfort food at its best.",
         "time": 40,
-        "ingredients": {
-            "Potato": 400,
-            "Onion": 100,
-            "Cream": 100,
-            "Milk": 200,
-            "Butter": 30,
-            "Salt": 5,
-            "Pepper": 2,
-        },
+        "ingredients": {"Potato": 400, "Onion": 100, "Cream": 100, "Milk": 200, "Butter": 30, "Salt": 5, "Pepper": 2},
         "steps": [
             "Peel and dice potatoes and onion.",
             "Sauté onion in butter until soft.",
             "Add potatoes and cover with just enough water to submerge.",
             "Simmer until potatoes are very tender.",
             "Mash potatoes in the pot or blend lightly.",
-            "Stir in milk and cream, heat through, and season.",
-        ],
+            "Stir in milk and cream, heat through, and season."
+        ]
     },
     {
         "name": "Fresh Fruit Salad",
         "description": "A refreshing mix of seasonal fruits.",
         "time": 10,
-        "ingredients": {
-            "Apple": 1,
-            "Banana": 1,
-            "Orange": 1,
-            "Strawberry": 100,
-            "Grape": 100,
-            "Lemon": 1,
-        },
+        "ingredients": {"Apple": 1, "Banana": 1, "Orange": 1, "Strawberry": 100, "Grape": 100, "Lemon": 1},
         "steps": [
             "Chop apple, banana, and orange into bite-sized pieces.",
             "Halve the strawberries and grapes.",
             "Combine all fruit in a large bowl.",
             "Squeeze fresh lemon juice over the fruit to prevent browning and add zest.",
-            "Toss well and serve chilled.",
-        ],
+            "Toss well and serve chilled."
+        ]
     },
     {
         "name": "Garlic Bread",
@@ -365,29 +251,22 @@ HANDMADE_RECIPES = [
             "Mix softened butter with minced garlic and a pinch of salt.",
             "Spread generously on slices of bread.",
             "Toast in the oven or a toaster oven until golden brown and crispy.",
-            "Serve warm.",
-        ],
+            "Serve warm."
+        ]
     },
     {
         "name": "Simple Tomato Salad",
         "description": "A light side dish letting fresh tomatoes shine.",
         "time": 5,
-        "ingredients": {
-            "Tomato": 300,
-            "Onion": 30,
-            "Olive Oil": 15,
-            "Vinegar": 5,
-            "Salt": 2,
-            "Pepper": 1,
-        },
+        "ingredients": {"Tomato": 300, "Onion": 30, "Olive Oil": 15, "Vinegar": 5, "Salt": 2, "Pepper": 1},
         "steps": [
             "Slice tomatoes into wedges.",
             "Slice onion very thinly.",
             "Arrange on a plate.",
             "Drizzle with olive oil and vinegar.",
-            "Season with salt and fresh cracked pepper.",
-        ],
-    },
+            "Season with salt and fresh cracked pepper."
+        ]
+    }
 ]
 
 REVIEW_COMMENTS = [
@@ -405,7 +284,7 @@ REVIEW_COMMENTS = [
     ("Best version of this I've ever made.", 5),
     ("My kids even ate the vegetables!", 5),
     ("Too oily.", 2),
-    ("Adding some chili flakes really improved it.", 4),
+    ("Adding some chili flakes really improved it.", 4)
 ]
 
 
@@ -420,7 +299,7 @@ async def create_users(session: AsyncSession, count=100):
         email="admin@example.com",
         password=hash_password("admin"),
         status="Active",
-        role="Admin",
+        role="Admin"
     )
     users.append(admin_user)
 
@@ -430,7 +309,7 @@ async def create_users(session: AsyncSession, count=100):
         email="user@example.com",
         password=hash_password("user"),
         status="Active",
-        role="User",
+        role="User"
     )
     users.append(regular_user)
 
@@ -439,12 +318,10 @@ async def create_users(session: AsyncSession, count=100):
         base_username = fake.user_name()
         # Reserve space for index number
         max_base_length = 20 - len(str(i)) if i > 0 else 20
-        username = (
-            f"{base_username[:max_base_length]}{i}" if i > 0 else base_username[:20]
-        )
+        username = f"{base_username[:max_base_length]}{i}" if i > 0 else base_username[:20]
 
         # Ensure unique email by adding index
-        email_parts = fake.email().split("@")
+        email_parts = fake.email().split('@')
         unique_email = f"{email_parts[0]}{i}@{email_parts[1]}"
 
         user = User(
@@ -452,7 +329,7 @@ async def create_users(session: AsyncSession, count=100):
             email=unique_email,
             password="$2b$12$q1EplR74rbbr8LOguX1ijOm.la4wq7415r2J8L46sroRI3o0ASNf.",  # "password123"
             status="Active",
-            role="Admin" if i < 3 else "User",
+            role="Admin" if i < 3 else "User"
         )
         users.append(user)
 
@@ -469,7 +346,9 @@ async def create_ingredients(session: AsyncSession):
 
     for name, unit, shelf_life in INGREDIENTS:
         ingredient = Ingredient(
-            name=name, standard_unit=unit, shelf_life_days=shelf_life
+            name=name,
+            standard_unit=unit,
+            shelf_life_days=shelf_life
         )
         ingredients.append(ingredient)
 
@@ -486,44 +365,34 @@ async def create_fridges(session: AsyncSession, users, count=50):
     fridges = []
     accesses = []
 
-    fridge_names = [
-        "Home Fridge",
-        "Work Fridge",
-        "Dorm Fridge",
-        "Garage Fridge",
-        "Office Fridge",
-    ]
+    fridge_names = ["Home Fridge", "Work Fridge", "Dorm Fridge", "Garage Fridge", "Office Fridge"]
 
     for i in range(count):
         # Create fridge
         fridge = Fridge(
             fridge_name=f"{random.choice(fridge_names)} #{i+1}",
-            description=fake.sentence() if random.random() > 0.5 else None,
+            description=fake.sentence() if random.random() > 0.5 else None
         )
         session.add(fridge)
         await session.flush()
 
         # Owner
         owner = random.choice(users)
-        accesses.append(
-            FridgeAccess(
-                fridge_id=fridge.fridge_id, user_id=owner.user_id, access_role="Owner"
-            )
-        )
+        accesses.append(FridgeAccess(
+            fridge_id=fridge.fridge_id,
+            user_id=owner.user_id,
+            access_role="Owner"
+        ))
 
         # Add 0-2 members
         num_members = random.randint(0, 2)
         available_users = [u for u in users if u.user_id != owner.user_id]
-        for member in random.sample(
-            available_users, min(num_members, len(available_users))
-        ):
-            accesses.append(
-                FridgeAccess(
-                    fridge_id=fridge.fridge_id,
-                    user_id=member.user_id,
-                    access_role="Member",
-                )
-            )
+        for member in random.sample(available_users, min(num_members, len(available_users))):
+            accesses.append(FridgeAccess(
+                fridge_id=fridge.fridge_id,
+                user_id=member.user_id,
+                access_role="Member"
+            ))
 
         fridges.append(fridge)
 
@@ -559,15 +428,13 @@ async def create_fridge_items(session: AsyncSession, fridges, ingredients, count
             entry_date = datetime.now().date() - timedelta(days=days_ago)
             expiry_date = entry_date + timedelta(days=ingredient.shelf_life_days)
 
-            items.append(
-                FridgeItem(
-                    fridge_id=fridge.fridge_id,
-                    ingredient_id=ingredient.ingredient_id,
-                    quantity=Decimal(str(qty)),
-                    entry_date=entry_date,
-                    expiry_date=expiry_date,
-                )
-            )
+            items.append(FridgeItem(
+                fridge_id=fridge.fridge_id,
+                ingredient_id=ingredient.ingredient_id,
+                quantity=Decimal(str(qty)),
+                entry_date=entry_date,
+                expiry_date=expiry_date
+            ))
 
         session.add_all(items)
         await session.commit()
@@ -591,7 +458,7 @@ async def create_recipes(session: AsyncSession, users, ingredients):
             recipe_name=recipe_data["name"],
             description=recipe_data["description"],
             cooking_time=recipe_data["time"],
-            status="Approved",
+            status="Approved"
         )
         session.add(recipe)
         await session.flush()
@@ -599,25 +466,21 @@ async def create_recipes(session: AsyncSession, users, ingredients):
         # Add ingredients
         for ing_name, qty in recipe_data["ingredients"].items():
             if ing_name in ing_map:
-                session.add(
-                    RecipeRequirement(
-                        recipe_id=recipe.recipe_id,
-                        ingredient_id=ing_map[ing_name].ingredient_id,
-                        quantity_needed=Decimal(str(qty)),
-                    )
-                )
+                session.add(RecipeRequirement(
+                    recipe_id=recipe.recipe_id,
+                    ingredient_id=ing_map[ing_name].ingredient_id,
+                    quantity_needed=Decimal(str(qty))
+                ))
             else:
-                print(
-                    f"Warning: Ingredient '{ing_name}' not found for recipe '{recipe_data['name']}'"
-                )
+                print(f"Warning: Ingredient '{ing_name}' not found for recipe '{recipe_data['name']}'")
 
         # Add steps
         for i, step_text in enumerate(recipe_data["steps"], 1):
-            session.add(
-                RecipeStep(
-                    recipe_id=recipe.recipe_id, step_number=i, description=step_text
-                )
-            )
+            session.add(RecipeStep(
+                recipe_id=recipe.recipe_id,
+                step_number=i,
+                description=step_text
+            ))
 
         recipes.append(recipe)
 
@@ -629,7 +492,7 @@ async def create_recipes(session: AsyncSession, users, ingredients):
 async def create_reviews(session: AsyncSession, users, recipes, count=500):
     """Create recipe reviews."""
     print(f"Creating {count} recipe reviews...")
-
+    
     reviews = []
     # Set of (user_id, recipe_id) to prevent duplicates
     reviewed_pairs = set()
@@ -639,16 +502,16 @@ async def create_reviews(session: AsyncSession, users, recipes, count=500):
         attempts += 1
         user = random.choice(users)
         recipe = random.choice(recipes)
-
+        
         # Don't let users review their own recipes (optional rule, but good for realism)
         if user.user_id == recipe.owner_id:
             continue
-
+            
         if (user.user_id, recipe.recipe_id) in reviewed_pairs:
             continue
 
         comment, rating = random.choice(REVIEW_COMMENTS)
-
+        
         # Add some randomness to rating
         if random.random() > 0.7:
             rating = max(1, min(5, rating + random.choice([-1, 1])))
@@ -658,9 +521,9 @@ async def create_reviews(session: AsyncSession, users, recipes, count=500):
             recipe_id=recipe.recipe_id,
             rating=rating,
             comment=comment,
-            review_date=datetime.now() - timedelta(days=random.randint(0, 180)),
+            review_date=datetime.now() - timedelta(days=random.randint(0, 180))
         )
-
+        
         reviews.append(review)
         reviewed_pairs.add((user.user_id, recipe.recipe_id))
 
@@ -685,7 +548,7 @@ async def create_meal_plans(session: AsyncSession, users, recipes, count=1000):
         # Get fridges that this user has access to
         result = await session.execute(
             text("SELECT fridge_id FROM fridge_access WHERE user_id = :user_id"),
-            {"user_id": user.user_id},
+            {"user_id": user.user_id}
         )
         user_fridges = result.fetchall()
 
@@ -700,16 +563,16 @@ async def create_meal_plans(session: AsyncSession, users, recipes, count=1000):
 
         # Determine logical status based on date
         if days_offset < 0:
-            status = random.choice(["Finished", "Canceled", "Insufficient"])  # Past
+            status = random.choice(["Finished", "Canceled", "Insufficient"]) # Past
         else:
-            status = random.choice(["Planned", "Ready", "Insufficient"])  # Future
+            status = random.choice(["Planned", "Ready", "Insufficient"]) # Future
 
         plan = MealPlan(
             user_id=user.user_id,
             recipe_id=recipe.recipe_id,
             fridge_id=fridge_id,
             planned_date=planned_date,
-            status=status,
+            status=status
         )
         meal_plans.append(plan)
 
@@ -723,16 +586,9 @@ async def create_partners(session: AsyncSession, ingredients, num_partners=10):
     print(f"Creating {num_partners} partners...")
 
     partner_names = [
-        "FreshMart",
-        "Sunny Foods",
-        "Green Valley",
-        "Ocean Harvest",
-        "Farm Direct",
-        "Quality Meats",
-        "Dairy Best",
-        "Organic Plus",
-        "Local Market",
-        "Fresh Express",
+        "FreshMart", "Sunny Foods", "Green Valley", "Ocean Harvest",
+        "Farm Direct", "Quality Meats", "Dairy Best", "Organic Plus",
+        "Local Market", "Fresh Express"
     ]
 
     partners = []
@@ -741,10 +597,9 @@ async def create_partners(session: AsyncSession, ingredients, num_partners=10):
     for name in partner_names[:num_partners]:
         partner = Partner(
             partner_name=name,
-            contract_date=datetime.now().date()
-            - timedelta(days=random.randint(30, 500)),
+            contract_date=datetime.now().date() - timedelta(days=random.randint(30, 500)),
             avg_shipping_days=random.randint(1, 5),
-            credit_score=random.randint(70, 100),
+            credit_score=random.randint(70, 100)
         )
         partners.append(partner)
 
@@ -755,9 +610,7 @@ async def create_partners(session: AsyncSession, ingredients, num_partners=10):
     # Create products
     for partner in partners:
         # Generate partner code (first 2-3 letters of partner name)
-        partner_code = "".join(
-            [c for c in partner.partner_name if c.isupper() or c.isdigit()]
-        )[:3]
+        partner_code = ''.join([c for c in partner.partner_name if c.isupper() or c.isdigit()])[:3]
         if not partner_code:
             partner_code = partner.partner_name[:3].upper()
 
@@ -796,17 +649,15 @@ async def create_partners(session: AsyncSession, ingredients, num_partners=10):
             # Example: FM-MILK-1L, GV-TOMATO-500G, OH-SHRIMP-6PK
             sku = f"{partner_code}-{ingredient_sku_part}-{package_code}"
 
-            products.append(
-                ExternalProduct(
-                    external_sku=sku,
-                    partner_id=partner.partner_id,
-                    ingredient_id=ingredient.ingredient_id,
-                    product_name=f"{ingredient.name} {selling_unit} - {partner.partner_name}",
-                    current_price=Decimal(str(round(random.uniform(2.99, 49.99), 2))),
-                    selling_unit=selling_unit,
-                    unit_quantity=Decimal(str(unit_quantity)),
-                )
-            )
+            products.append(ExternalProduct(
+                external_sku=sku,
+                partner_id=partner.partner_id,
+                ingredient_id=ingredient.ingredient_id,
+                product_name=f"{ingredient.name} {selling_unit} - {partner.partner_name}",
+                current_price=Decimal(str(round(random.uniform(2.99, 49.99), 2))),
+                selling_unit=selling_unit,
+                unit_quantity=Decimal(str(unit_quantity))
+            ))
 
     session.add_all(products)
     await session.commit()
@@ -829,7 +680,7 @@ async def create_orders(session: AsyncSession, users, partners, products, count=
         # Get fridges that this user has access to
         result = await session.execute(
             text("SELECT fridge_id FROM fridge_access WHERE user_id = :user_id"),
-            {"user_id": user.user_id},
+            {"user_id": user.user_id}
         )
         user_fridges = result.fetchall()
 
@@ -848,7 +699,7 @@ async def create_orders(session: AsyncSession, users, partners, products, count=
             order_date=order_date,
             expected_arrival=expected_arrival,
             total_price=Decimal("0"),
-            order_status=random.choice(statuses),
+            order_status=random.choice(statuses)
         )
         session.add(order)
         await session.flush()
@@ -861,21 +712,17 @@ async def create_orders(session: AsyncSession, users, partners, products, count=
         num_items = random.randint(1, 4)
         total = Decimal("0")
 
-        for product in random.sample(
-            partner_products, min(num_items, len(partner_products))
-        ):
+        for product in random.sample(partner_products, min(num_items, len(partner_products))):
             qty = random.randint(1, 5)
             price = product.current_price
 
-            order_items.append(
-                OrderItem(
-                    order_id=order.order_id,
-                    external_sku=product.external_sku,
-                    partner_id=partner.partner_id,
-                    quantity=qty,
-                    deal_price=price,
-                )
-            )
+            order_items.append(OrderItem(
+                order_id=order.order_id,
+                external_sku=product.external_sku,
+                partner_id=partner.partner_id,
+                quantity=qty,
+                deal_price=price
+            ))
             total += price * qty
 
         order.total_price = total
@@ -885,127 +732,12 @@ async def create_orders(session: AsyncSession, users, partners, products, count=
     await session.commit()
     print(f"✓ Created {len(orders)} orders with {len(order_items)} items")
 
-async def generate_orders(session: AsyncSession, user_ids, partner_ids):
-    """Generate orders and items."""
-    print(f"Generating {NUM_ORDERS} orders...")
-    
-    # Pre-fetch products by partner for fast lookup
-    print("  Fetching products map...")
-    products_result = await session.execute(select(ExternalProduct))
-    products_by_partner = {}
-    for p in products_result.scalars().all():
-        if p.partner_id not in products_by_partner:
-            products_by_partner[p.partner_id] = []
-        products_by_partner[p.partner_id].append(p)
-        
-    orders_created = []
-    
-    for i in range(NUM_ORDERS):
-        user_id = random.choice(user_ids)
-        partner_id = random.choice(partner_ids)
-        
-        # Random date in last 90 days
-        order_date = datetime.utcnow() - timedelta(days=random.randint(0, 90))
-        status = random.choice(['Pending', 'Paid', 'Shipped', 'Delivered', 'Cancelled'])
-        
-        order = StoreOrder(
-            user_id=user_id,
-            partner_id=partner_id,
-            order_date=order_date,
-            expected_arrival=order_date + timedelta(days=3),
-            total_price=0, # Will update later
-            order_status=status
-        )
-        session.add(order)
-        orders_created.append(order)
-        
-        # Flush every batch to get IDs and create items
-        if len(orders_created) >= 100:
-            await session.flush()
-            
-            current_items_batch = []
-            
-            for o in orders_created[-100:]:
-                if o.partner_id not in products_by_partner: continue
-                
-                avail_products = products_by_partner[o.partner_id]
-                if not avail_products: continue
-                
-                # Randomly pick 1-5 products
-                num_items = random.randint(1, 5)
-                selected_products = random.sample(avail_products, min(len(avail_products), num_items))
-                
-                total = Decimal(0)
-                for prod in selected_products:
-                    qty = random.randint(1, 3)
-                    price = prod.current_price
-                    total += price * qty
-                    
-                    current_items_batch.append({
-                        "order_id": o.order_id,
-                        "external_sku": prod.external_sku,
-                        "partner_id": o.partner_id,
-                        "quantity": qty,
-                        "deal_price": price
-                    })
-                
-                o.total_price = total
-            
-            if current_items_batch:
-                await session.execute(insert(OrderItem), current_items_batch)
-                
-            orders_created = [] # Clear list
-            print(f"  Created {i+1} orders...")
-            
-    await session.commit()
-    print(f"✓ Created {NUM_ORDERS} orders")
 
 async def main():
-
-    """Main generation script."""
-    print("=" * 60)
-    print("NEW Fridge - Optimized Data Generator")
-    print("=" * 60)
-    
-    start_time = time.time()
-    
-    await init_db()
-    
-    async with async_session_maker() as session:
-        # Get IDs after generation
-        users_data = await generate_users(session)
-        # Fetch user IDs
-        result = await session.execute(select(User.user_id))
-        user_ids = result.scalars().all()
-        
-        await generate_ingredients(session)
-        result = await session.execute(select(Ingredient.ingredient_id))
-        ingredient_ids = result.scalars().all()
-        
-        fridge_ids = await generate_fridges(session, user_ids)
-        
-        await generate_fridge_items_optimized(session, fridge_ids, ingredient_ids)
-        
-        recipe_ids = await generate_recipes(session, user_ids, ingredient_ids)
-        
-        await generate_reviews_optimized(session, user_ids, recipe_ids)
-        
-        await generate_meal_plans_optimized(session, user_ids, recipe_ids, fridge_ids)
-        
-        # 1. 接收回傳的 partner_ids
-        partner_ids = await generate_partners_and_products(session, ingredient_ids)
-        
-        # 2. 呼叫剛剛新增的函式
-        await generate_orders(session, user_ids, partner_ids)
-        
-        await session.commit()
-        
-    end_time = time.time()
-
     """Generate all test data."""
-    print("\n" + "=" * 60)
+    print("\n" + "="*60)
     print("NEW Fridge - Test Data Generator")
-    print("=" * 60 + "\n")
+    print("="*60 + "\n")
 
     await init_db()
 
@@ -1018,15 +750,13 @@ async def main():
         # New functions
         await create_reviews(session, users, recipes, count=2000)
         await create_meal_plans(session, users, recipes, count=5000)
-
-        partners, products = await create_partners(
-            session, ingredients, num_partners=10
-        )
+        
+        partners, products = await create_partners(session, ingredients, num_partners=10)
         await create_orders(session, users, partners, products, count=10000)
 
-    print("\n" + "=" * 60)
+    print("\n" + "="*60)
     print("✓ Data generation complete!")
-    print("=" * 60)
+    print("="*60)
     print("\nSummary:")
     print("  • 500 users (3 admins)")
     print("  • 41 ingredients")
