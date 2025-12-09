@@ -314,6 +314,10 @@ class RecipeService:
             }
         )
 
+        # Update meal plan statuses after cooking (inventory consumed)
+        from services.procurement_service import ProcurementService
+        await ProcurementService.update_meal_plan_statuses(request.fridge_id, session)
+
         return CookRecipeResponse(
             recipe_name=recipe_detail.recipe_name,
             ingredients_consumed=consumption_report,
@@ -423,6 +427,13 @@ class RecipeService:
         )
         session.add(new_plan)
         await session.commit()
+        await session.refresh(new_plan)
+
+        # Update meal plan status immediately after creation (check availability)
+        from services.procurement_service import ProcurementService
+        await ProcurementService.update_meal_plan_statuses(request.fridge_id, session)
+
+        # Refresh to get updated status
         await session.refresh(new_plan)
 
         return new_plan

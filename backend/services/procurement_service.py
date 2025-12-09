@@ -501,23 +501,29 @@ class ProcurementService:
     ) -> None:
         """
         Cancel a pending order (users can only cancel their own pending orders).
+
+        Uses pessimistic locking (SELECT FOR UPDATE) to prevent race conditions.
         """
         from core.order_status import OrderStatusManager
 
+        # Use pessimistic locking to prevent concurrent status changes
         result = await session.execute(
-            select(StoreOrder).where(
+            select(StoreOrder)
+            .where(
                 and_(
                     StoreOrder.order_id == order_id,
                     StoreOrder.user_id == current_user_id
                 )
             )
+            .with_for_update()  # Lock the row until transaction completes
         )
         order = result.scalar_one_or_none()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # Validate transition using state machine
+        # After acquiring lock, re-check status (might have changed)
+        # If concurrent transaction already changed status, validation will fail
         OrderStatusManager.validate_transition(
             current_status=order.order_status,
             new_status="Cancelled",
@@ -543,25 +549,30 @@ class ProcurementService:
         - Expiry dates are set (delivery date + 7 days)
         - Meal plan statuses are updated
 
+        Uses pessimistic locking to prevent race conditions.
+
         Returns:
             Number of items added to fridge
         """
         from core.order_status import OrderStatusManager
 
+        # Use pessimistic locking to prevent concurrent status changes
         result = await session.execute(
-            select(StoreOrder).where(
+            select(StoreOrder)
+            .where(
                 and_(
                     StoreOrder.order_id == order_id,
                     StoreOrder.user_id == current_user_id
                 )
             )
+            .with_for_update()  # Lock the row until transaction completes
         )
         order = result.scalar_one_or_none()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # Validate transition using state machine
+        # After acquiring lock, re-check status
         OrderStatusManager.validate_transition(
             current_status=order.order_status,
             new_status="Delivered",
@@ -659,18 +670,23 @@ class ProcurementService:
         [Admin] Update order status with state machine validation.
 
         When status is changed to "Delivered", automatically adds items to fridge.
+
+        Uses pessimistic locking to prevent race conditions.
         """
         from core.order_status import OrderStatusManager
 
+        # Use pessimistic locking to prevent concurrent status changes
         result = await session.execute(
-            select(StoreOrder).where(StoreOrder.order_id == order_id)
+            select(StoreOrder)
+            .where(StoreOrder.order_id == order_id)
+            .with_for_update()  # Lock the row until transaction completes
         )
         order = result.scalar_one_or_none()
 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # Validate transition using state machine (admin role)
+        # After acquiring lock, re-check status and validate transition
         OrderStatusManager.validate_transition(
             current_status=order.order_status,
             new_status=request.order_status,
@@ -752,6 +768,7 @@ class ProcurementService:
                     MealPlan.planned_date <= datetime.combine(cutoff_date, datetime.max.time())
                 )
             )
+            .order_by(MealPlan.planned_date.asc())  # Sort by date for timeline simulation
         )
         meal_plans = meal_plans_result.scalars().all()
 
@@ -798,6 +815,7 @@ class ProcurementService:
                         StoreOrder.expected_arrival <= cutoff_date
                     )
                 )
+                .order_by(StoreOrder.expected_arrival.asc())  # Sort by arrival date
             )
 
             # Collect arrival events (add to batches on arrival date)
@@ -1184,6 +1202,10 @@ class ProcurementService:
 
         await session.commit()
         await session.refresh(new_order)
+
+        # Update meal plan statuses after order creation (pending order may make plans Ready)
+        if request.fridge_id:
+            await ProcurementService.update_meal_plan_statuses(request.fridge_id, session)
 
         return OrderResponse(
             order_id=new_order.order_id,

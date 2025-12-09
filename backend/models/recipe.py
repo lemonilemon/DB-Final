@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlmodel import Field, SQLModel, Relationship
+from sqlalchemy import Index
 
 
 class Recipe(SQLModel, table=True):
@@ -185,6 +186,9 @@ class MealPlan(SQLModel, table=True):
       - "Canceled": User canceled the plan
     """
     __tablename__ = "meal_plan"
+    __table_args__ = (
+        Index("idx_meal_plan_user_date", "user_id", "planned_date"),
+    )
 
     plan_id: Optional[int] = Field(
         default=None,

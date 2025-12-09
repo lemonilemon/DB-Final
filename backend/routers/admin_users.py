@@ -36,7 +36,7 @@ async def get_all_users(
 
     Returns user details including ID, username, email, status, and role.
     """
-    result = await session.execute(select(User).order_by(User.created_at.desc()))
+    result = await session.execute(select(User).order_by(User.user_name.asc()))
     users = result.scalars().all()
 
     return [

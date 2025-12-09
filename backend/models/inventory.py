@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from sqlmodel import Field, SQLModel, Relationship
+from sqlalchemy import Index
 
 
 class Ingredient(SQLModel, table=True):
@@ -57,6 +58,10 @@ class FridgeItem(SQLModel, table=True):
     - expiry_date: When item expires (for FIFO)
     """
     __tablename__ = "fridge_item"
+    __table_args__ = (
+        Index("idx_fridge_item_lookup", "fridge_id", "ingredient_id"),
+        Index("idx_fridge_item_expiry", "fridge_id", "expiry_date"),
+    )
 
     fridge_item_id: Optional[int] = Field(
         default=None,

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlmodel import Field, SQLModel, Relationship
+from sqlalchemy import Index
 
 
 class Partner(SQLModel, table=True):
@@ -59,6 +60,9 @@ class ExternalProduct(SQLModel, table=True):
     - unit_quantity: Quantity in standard_unit per selling unit (e.g., 1000ml per bottle)
     """
     __tablename__ = "external_product"
+    __table_args__ = (
+        Index("idx_ext_prod_ing_price", "ingredient_id", "current_price"),
+    )
 
     partner_id: int = Field(
         foreign_key="partner.partner_id",
@@ -160,6 +164,9 @@ class StoreOrder(SQLModel, table=True):
     - order_status: Order state (max 15 chars)
     """
     __tablename__ = "store_order"
+    __table_args__ = (
+        Index("idx_order_user_date", "user_id", "order_date"),
+    )
 
     order_id: Optional[int] = Field(
         default=None,

@@ -173,6 +173,10 @@ class InventoryService:
         await session.commit()
         await session.refresh(new_item)
 
+        # Update meal plan statuses after inventory change
+        from services.procurement_service import ProcurementService
+        await ProcurementService.update_meal_plan_statuses(fridge_id, session)
+
         return new_item
 
     @staticmethod
@@ -307,6 +311,10 @@ class InventoryService:
         await session.delete(item)
         await session.commit()
 
+        # Update meal plan statuses after inventory change
+        from services.procurement_service import ProcurementService
+        await ProcurementService.update_meal_plan_statuses(fridge_id, session)
+
     # ========================================================================
     # FIFO Consumption Logic
     # ========================================================================
@@ -396,6 +404,10 @@ class InventoryService:
                 items_consumed_count += 1
 
         await session.commit()
+
+        # Update meal plan statuses after inventory change
+        from services.procurement_service import ProcurementService
+        await ProcurementService.update_meal_plan_statuses(fridge_id, session)
 
         # Calculate remaining quantity after consumption
         remaining_quantity = total_available - request.quantity
