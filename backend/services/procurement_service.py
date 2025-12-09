@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict
+from typing import List, Dict, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
