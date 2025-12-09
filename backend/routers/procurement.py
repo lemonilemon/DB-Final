@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
+from collections import defaultdict  # <--- 修正 1: 補上這個缺少的引入
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from schemas.procurement import (
     ShoppingListAddRequest,
     ShoppingListItemResponse,
     OrderResponse,
+    OrderItemResponse,  # <--- 確保有引入 OrderItemResponse
     CreateOrdersResponse,
     OrderUpdateStatusRequest,
     MessageResponse,
@@ -533,26 +535,25 @@ async def admin_update_order_status(
 async def admin_get_all_orders_paginated(
     admin_user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
-    status_filter: Optional[str] = Query(None, description="Filter by order status")
+    user_id: Optional[UUID] = Query(None),
+    status_filter: Optional[str] = Query(None),
+    limit: int = Query(50, description="Pagination limit"),
+    offset: int = Query(0, description="Pagination offset")
 ):
     """
-    Admin: Paginated order listing.
-    Returns only the requested page instead of ALL orders.
+    [Admin Only] Optimized view of all orders using single query.
     """
-
-    from sqlalchemy import select, and_, func
+    from sqlalchemy.orm import selectinload
     from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
-    from schemas.procurement import OrderResponse, OrderItemResponse
+    from sqlalchemy import select
 
-    # -------------------------
-    # Step 1: Build base query
-    # -------------------------
-    base_query = (
+    # 1. Step 1: 撈出訂單主檔 (加上分頁)
+    query = (
         select(StoreOrder, Partner)
         .join(Partner, StoreOrder.partner_id == Partner.partner_id)
+        .order_by(StoreOrder.order_date.desc())
+        .limit(limit)
+        .offset(offset)
     )
 
     if user_id:
@@ -560,57 +561,51 @@ async def admin_get_all_orders_paginated(
     if status_filter:
         base_query = base_query.where(StoreOrder.order_status == status_filter)
 
-    # -------------------------
-    # Step 2: Count total rows
-    # -------------------------
-    count_query = select(func.count()).select_from(base_query.subquery())
-    total_result = await session.execute(count_query)
-    total = total_result.scalar() or 0
+    result = await session.execute(query)
+    orders_data = result.all()  # [(Order, Partner), ...]
 
-    # -------------------------
-    # Step 3: Fetch paginated rows
-    # -------------------------
-    offset = (page - 1) * page_size
+    if not orders_data:
+        return []
 
-    page_query = (
-        base_query
-        .order_by(StoreOrder.order_date.desc())
-        .offset(offset)
-        .limit(page_size)
+    # 2. Step 2: 收集所有 Order ID
+    order_ids = [row[0].order_id for row in orders_data]
+
+    # 3. Step 3: 一次撈出這些訂單的所有明細 (Batch Query)
+    items_query = (
+        select(OrderItem, ExternalProduct)
+        .join(ExternalProduct, 
+              (OrderItem.partner_id == ExternalProduct.partner_id) & 
+              (OrderItem.external_sku == ExternalProduct.external_sku))
+        .where(OrderItem.order_id.in_(order_ids))
     )
+    
+    items_result = await session.execute(items_query)
+    all_items = items_result.all()
 
-    results = await session.execute(page_query)
-    rows = results.all()
+    # 4. Step 4: 在記憶體中將 Item 分配給 Order
+    items_map = defaultdict(list)
+    for item, product in all_items:
+        items_map[item.order_id].append({
+            "item": item,
+            "product": product
+        })
 
-    # -------------------------
-    # Step 4: Build order list
-    # -------------------------
-    order_list = []
-
-    for order, partner in rows:
-
-        items_query = await session.execute(
-            select(OrderItem, ExternalProduct)
-            .join(ExternalProduct,
-                  and_(
-                      OrderItem.partner_id == ExternalProduct.partner_id,
-                      OrderItem.external_sku == ExternalProduct.external_sku
-                  ))
-            .where(OrderItem.order_id == order.order_id)
-        )
-
-        items = items_query.all()
-
+    # 5. Step 5: 組裝回應
+    order_responses = []
+    for order, partner in orders_data:
+        # 從記憶體 Map 中取得明細
+        order_items = items_map.get(order.order_id, [])
+        
         item_responses = [
             OrderItemResponse(
-                external_sku=oi.external_sku,
-                product_name=prod.product_name,
+                external_sku=entry["item"].external_sku,
+                product_name=entry["product"].product_name,
                 partner_name=partner.partner_name,
-                quantity=oi.quantity,
-                deal_price=oi.deal_price,
-                subtotal=oi.deal_price * oi.quantity
+                quantity=entry["item"].quantity,
+                deal_price=entry["item"].deal_price,
+                subtotal=entry["item"].deal_price * entry["item"].quantity
             )
-            for oi, prod in items
+            for entry in order_items
         ]
 
         order_list.append(
@@ -627,81 +622,4 @@ async def admin_get_all_orders_paginated(
             )
         )
 
-    # -------------------------
-    # Step 5: Return paginated result
-    # -------------------------
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "items": order_list
-    }
-
-# async def admin_get_all_orders(
-#     admin_user: User = Depends(require_admin),
-#     session: AsyncSession = Depends(get_session),
-#     user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
-#     status_filter: Optional[str] = Query(None, description="Filter by order status")
-# ):
-#     """
-#     **[Admin Only]** View all orders in the system with optional filtering.
-
-#     - Filter by user_id to see a specific user's orders
-#     - Filter by status to see orders in a specific state
-#     """
-#     from sqlalchemy import select, and_
-#     from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
-#     from schemas.procurement import OrderItemResponse
-
-#     # Build query
-#     query = (
-#         select(StoreOrder, Partner)
-#         .join(Partner, StoreOrder.partner_id == Partner.partner_id)
-#         .order_by(StoreOrder.order_date.desc())
-#     )
-
-#     if user_id:
-#         query = query.where(StoreOrder.user_id == user_id)
-#     if status_filter:
-#         query = query.where(StoreOrder.order_status == status_filter)
-
-#     result = await session.execute(query)
-#     orders = result.all()
-
-#     order_responses = []
-#     for order, partner in orders:
-#         # Get order items
-#         items_result = await session.execute(
-#             select(OrderItem, ExternalProduct)
-#             .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
-#             .where(OrderItem.order_id == order.order_id)
-#         )
-#         items = items_result.all()
-
-#         item_responses = [
-#             OrderItemResponse(
-#                 external_sku=item.external_sku,
-#                 product_name=product.product_name,
-#                 partner_name=partner.partner_name,
-#                 quantity=item.quantity,
-#                 deal_price=item.deal_price,
-#                 subtotal=item.deal_price * item.quantity
-#             )
-#             for item, product in items
-#         ]
-
-#         order_responses.append(
-#             OrderResponse(
-#                 order_id=order.order_id,
-#                 user_id=order.user_id,
-#                 partner_id=order.partner_id,
-#                 partner_name=partner.partner_name,
-#                 order_date=order.order_date,
-#                 expected_arrival=order.expected_arrival,
-#                 total_price=order.total_price,
-#                 order_status=order.order_status,
-#                 items=item_responses
-#             )
-#         )
-
-#     return order_responses
+    return order_responses
