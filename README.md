@@ -66,6 +66,9 @@ With optimized indexing strategy:
 git clone <repository-url>
 cd final
 
+# Copy environment variables
+cp .env.example .env
+
 # Start backend services (NOT frontend)
 docker compose up -d
 
@@ -131,6 +134,7 @@ Expected output should include `idx_fridge_item_fifo` (FIFO composite index).
 
 ```bash
 docker compose exec backend python3 scripts/generate_data.py
+docker compose exec backend python3 scripts/generate_behavioral_data.py
 ```
 
 **Generates**:
@@ -154,8 +158,8 @@ docker compose exec backend python3 scripts/generate_data.py
 | **Mongo Express** | http://localhost:8081 | admin / password |
 
 **Test Login**:
-- Admin: `admin@example.com` / `admin`
-- User: `user@example.com` / `user`
+- Admin: `admin` / `admin`
+- User: `user` / `user`
 
 ### 5. Test the System
 
@@ -183,9 +187,6 @@ docker compose exec backend python3 scripts/generate_data.py
 ```bash
 # General index performance (8 common queries)
 docker compose exec backend python3 scripts/test_performance.py
-
-# FIFO index comparison (composite vs separate)
-docker compose exec backend python3 scripts/test_fifo_performance.py
 ```
 
 **What it tests**:
