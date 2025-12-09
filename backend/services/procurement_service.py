@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Dict, Optional
 from uuid import UUID
+import math
 
 from fastapi import HTTPException
 from sqlalchemy import select, and_, func
@@ -288,6 +289,7 @@ class ProcurementService:
     @staticmethod
     async def create_orders_from_shopping_list(
         current_user_id: UUID,
+        fridge_id: UUID,
         session: AsyncSession
     ) -> CreateOrdersResponse:
         """
@@ -301,10 +303,15 @@ class ProcurementService:
         5. Add OrderItems with price snapshots (deal_price)
         6. Calculate expected delivery dates
         7. Clear shopping list
+        8. Update meal plan statuses for the fridge
 
         Returns:
             Details of all created orders grouped by partner
         """
+        from services.fridge_service import FridgeService
+
+        # Verify fridge access
+        await FridgeService._check_fridge_access(fridge_id, current_user_id, session)
         # Get shopping list
         shopping_list = await ProcurementService.get_shopping_list(current_user_id, session)
 
@@ -354,10 +361,15 @@ class ProcurementService:
             partner = items[0]['partner']  # Get partner from first item
 
             # Calculate total price for this order
-            order_total = sum(
-                item['product'].current_price * int(item['quantity_needed'])
-                for item in items
-            )
+            # Note: quantity_needed is in standard units (e.g., 2000ml)
+            #       unit_quantity is standard units per item (e.g., 1000ml per bottle)
+            #       We need to calculate number of items: ceil(2000 / 1000) = 2 bottles
+            order_total = Decimal(0)
+            for item in items:
+                qty_needed = Decimal(str(item['quantity_needed']))
+                unit_qty = item['product'].unit_quantity
+                items_needed = math.ceil(qty_needed / unit_qty)
+                order_total += item['product'].current_price * items_needed
 
             # Calculate expected arrival
             expected_arrival = date.today() + timedelta(days=partner.avg_shipping_days)
@@ -366,6 +378,7 @@ class ProcurementService:
             new_order = StoreOrder(
                 user_id=current_user_id,
                 partner_id=partner_id,
+                fridge_id=fridge_id,  # Associate order with fridge
                 order_date=datetime.utcnow(),
                 expected_arrival=expected_arrival,
                 total_price=order_total,
@@ -378,7 +391,10 @@ class ProcurementService:
             order_items_responses = []
             for item in items:
                 product = item['product']
-                quantity = int(item['quantity_needed'])
+                # Calculate number of packages/items needed
+                qty_needed = Decimal(str(item['quantity_needed']))
+                unit_qty = product.unit_quantity
+                quantity = math.ceil(qty_needed / unit_qty)
 
                 order_item = OrderItem(
                     order_id=new_order.order_id,
@@ -428,6 +444,9 @@ class ProcurementService:
             await session.delete(item)
 
         await session.commit()
+
+        # Update meal plan statuses for this fridge (pending orders may resolve insufficiencies)
+        await ProcurementService.update_meal_plan_statuses(fridge_id, session)
 
         return CreateOrdersResponse(
             orders_created=len(created_orders),

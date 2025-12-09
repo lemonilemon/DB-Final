@@ -174,6 +174,7 @@ async def check_availability(
     recipe_id: int = Query(..., description="Recipe to check"),
     fridge_id: UUID = Query(..., description="Fridge to check"),
     needed_by: date = Query(..., description="Date when ingredients are needed"),
+    exclude_plan_id: Optional[int] = Query(None, description="Exclude this meal plan from timeline (avoid double-counting)"),
     session: AsyncSession = Depends(get_session)
 ):
     """
@@ -182,11 +183,12 @@ async def check_availability(
     **Considers:**
     - Current fridge inventory
     - Expiration dates (items expiring before needed_by are excluded)
-    - Future consumption (TODO: subtract ingredients from other meal plans)
+    - Future consumption from other meal plans
+    - Pending/shipped orders that will arrive
 
     **Use cases:**
-    - Frontend calls this when creating a meal plan
-    - Frontend calls this after consuming/removing items
+    - Frontend calls this when creating a meal plan (exclude_plan_id=None)
+    - Frontend calls this for existing meal plan (exclude_plan_id=plan.plan_id to avoid double-counting)
     - Shows what needs to be ordered
 
     **Example:**
@@ -196,7 +198,7 @@ async def check_availability(
     - Result: Milk insufficient (need 300ml more)
     """
     return await ProcurementService.check_recipe_availability(
-        recipe_id, fridge_id, needed_by, session
+        recipe_id, fridge_id, needed_by, session, exclude_plan_id
     )
 
 
@@ -332,6 +334,58 @@ async def create_order(
     )
 
     return order
+
+
+@order_router.post(
+    "/from-shopping-list",
+    response_model=CreateOrdersResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create orders from shopping list (auto-split by partner)"
+)
+async def create_orders_from_shopping_list(
+    fridge_id: UUID = Query(..., description="Fridge to associate orders with"),
+    current_user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Create orders from shopping list with AUTOMATIC PARTNER SPLITTING.
+
+    **How it works:**
+    1. Takes all items from your shopping list
+    2. For each ingredient, finds the cheapest external product
+    3. **Groups products by partner** (split orders automatically)
+    4. Creates ONE order per partner (associated with specified fridge)
+    5. Clears your shopping list
+    6. Updates meal plan statuses for the fridge
+
+    **Example:**
+    - Shopping list has: Milk (Partner A), Eggs (Partner B), Cheese (Partner A)
+    - Result: 2 orders created (1 for Partner A with milk+cheese, 1 for Partner B with eggs)
+
+    **Benefits:**
+    - Automatic optimization (cheapest products)
+    - Proper order splitting by supplier
+    - Price snapshots preserved
+    - Meal plans automatically updated to "Ready" if orders fulfill requirements
+    """
+    result = await ProcurementService.create_orders_from_shopping_list(
+        current_user_id, fridge_id, session
+    )
+
+    # Log order creation
+    await BehaviorService.log_user_action(
+        action_type="create_order",
+        user_id=current_user_id,
+        resource_type="order",
+        resource_id="batch",
+        metadata={
+            "orders_created": result.orders_created,
+            "total_partners": result.total_partners,
+            "total_amount": str(result.total_amount)
+        }
+    )
+
+    return result
 
 
 @order_router.get(

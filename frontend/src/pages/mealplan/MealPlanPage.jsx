@@ -5,6 +5,7 @@ import {
   deleteMealPlan,
 } from "../../api/mealplan";
 import { searchRecipes } from "../../api/recipes";
+import { checkAvailability, addShoppingItem } from "../../api/shopping";
 
 export default function MealPlansPage() {
   const [plans, setPlans] = useState([]);
@@ -73,6 +74,43 @@ export default function MealPlansPage() {
   const handleDelete = async (id) => {
     await deleteMealPlan(id);
     await loadPlans();
+  };
+
+  // ------------------------------------
+  // Add missing ingredients to shopping list
+  // ------------------------------------
+  const handleAddMissingIngredients = async (plan) => {
+    try {
+      // Check availability to get missing ingredients
+      // Pass plan_id to avoid double-counting this meal plan
+      const availability = await checkAvailability(
+        plan.recipe_id,
+        plan.fridge_id,
+        plan.planned_date,
+        plan.plan_id  // Exclude this plan from timeline to avoid double-counting
+      );
+
+      if (availability.all_available) {
+        alert("All ingredients are available!");
+        return;
+      }
+
+      // Add each missing ingredient to shopping list
+      for (const missing of availability.missing_ingredients) {
+        await addShoppingItem({
+          ingredient_id: missing.ingredient_id,
+          quantity_to_buy: missing.shortage,
+          needed_by: missing.needed_by,
+        });
+      }
+
+      alert(
+        `Added ${availability.missing_ingredients.length} ingredient(s) to shopping list!`
+      );
+    } catch (error) {
+      console.error("Error adding ingredients:", error);
+      alert("Failed to add ingredients to shopping list");
+    }
   };
 
   return (
@@ -147,7 +185,8 @@ export default function MealPlansPage() {
           <tr>
             <th>Date</th>
             <th>Recipe</th>
-            <th></th>
+            <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -156,6 +195,33 @@ export default function MealPlansPage() {
               <td>{p.planned_date}</td>
               <td>{p.recipe_name}</td>
               <td>
+                <span
+                  style={{
+                    color:
+                      p.status === "Ready"
+                        ? "green"
+                        : p.status === "Insufficient"
+                        ? "red"
+                        : p.status === "Finished"
+                        ? "blue"
+                        : p.status === "Cancelled"
+                        ? "gray"
+                        : "orange",
+                  }}
+                >
+                  {p.status}
+                </span>
+              </td>
+              <td>
+                {p.status === "Insufficient" && (
+                  <button
+                    className="btn-primary"
+                    style={{ marginRight: 8 }}
+                    onClick={() => handleAddMissingIngredients(p)}
+                  >
+                    Add to Cart
+                  </button>
+                )}
                 <button
                   className="btn-link danger"
                   onClick={() => handleDelete(p.plan_id)}

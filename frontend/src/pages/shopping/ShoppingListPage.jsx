@@ -6,6 +6,7 @@ import {
   removeShoppingItem,
   getRecommendations,
   createOrder,
+  createOrdersFromShoppingList,
 } from "../../api/shopping";
 import { getUserFridges } from "../../api/fridge";
 
@@ -193,31 +194,126 @@ export default function ShoppingListPage() {
   })();
 
   // Add to order
-  const addOrderItem = (p) => setOrderItems((prev) => [...prev, p]);
+  const addOrderItem = (p) => {
+    // Calculate quantity needed for this product
+    const quantity = itemsNeeded(recData.quantity_needed, p.unit_quantity);
+    setOrderItems((prev) => [...prev, { ...p, quantity: Number(quantity) }]);
+  };
 
-  // Submit order
+  // Submit order (manual selection)
   const submitOrder = async () => {
     if (!selectedFridge) return alert("Select a fridge first.");
     if (!orderItems.length) return alert("No items selected.");
 
-    const payload = {
-      fridge_id: selectedFridge,
-      items: orderItems.map((p) => ({
-        external_sku: p.external_sku,
-        partner_id: p.partner_id,
-        quantity: 1,
-      })),
-    };
+    try {
+      // Group items by partner_id (split orders)
+      const itemsByPartner = {};
+      orderItems.forEach((p) => {
+        if (!itemsByPartner[p.partner_id]) {
+          itemsByPartner[p.partner_id] = [];
+        }
+        itemsByPartner[p.partner_id].push({
+          external_sku: p.external_sku,
+          partner_id: p.partner_id,
+          quantity: p.quantity || 1,
+        });
+      });
 
-    const result = await createOrder(payload);
-    setOrderResult(result);
-    setOrderItems([]);
-    setRecData(null);
+      const partnerIds = Object.keys(itemsByPartner);
+      const createdOrders = [];
+
+      // Create one order per partner
+      for (const partnerId of partnerIds) {
+        const payload = {
+          fridge_id: selectedFridge,
+          items: itemsByPartner[partnerId],
+        };
+
+        const result = await createOrder(payload);
+        createdOrders.push(result);
+      }
+
+      // Show success message
+      if (createdOrders.length === 1) {
+        setOrderResult(createdOrders[0]);
+      } else {
+        alert(
+          `✅ Created ${createdOrders.length} orders (split by partner)\n\n` +
+          createdOrders
+            .map(
+              (o, i) =>
+                `Order ${i + 1}: ${o.partner_name} - $${formatPrice(o.total_price)}`
+            )
+            .join("\n")
+        );
+      }
+
+      setOrderItems([]);
+      setRecData(null);
+    } catch (error) {
+      console.error("Order creation failed:", error);
+      alert("Failed to create order: " + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  // Checkout all from shopping list (auto-split by partner)
+  const handleCheckoutAll = async () => {
+    if (items.length === 0) {
+      return alert("Shopping list is empty");
+    }
+
+    if (!selectedFridge) {
+      return alert("Please select a fridge first");
+    }
+
+    if (!confirm(`Create orders for all ${items.length} items in your shopping list?\n\nOrders will be automatically split by partner and optimized for cheapest prices.`)) {
+      return;
+    }
+
+    try {
+      const result = await createOrdersFromShoppingList(selectedFridge);
+
+      alert(
+        `✅ Success!\n\n` +
+        `Orders created: ${result.orders_created}\n` +
+        `Partners: ${result.total_partners}\n` +
+        `Total amount: $${result.total_amount}\n\n` +
+        result.message +
+        `\n\n💡 Meal plan statuses have been updated!`
+      );
+
+      // Reload shopping list (should be empty now)
+      await loadShoppingList();
+      setRecData(null);
+      setOrderItems([]);
+    } catch (error) {
+      console.error("Checkout failed:", error);
+      alert("Failed to checkout: " + (error.response?.data?.detail || error.message));
+    }
   };
 
   return (
     <div className="page">
       <h1>Shopping List</h1>
+
+      {/* ================= Select Fridge ================= */}
+      <div className="panel">
+        <h2>Select Fridge</h2>
+        <select
+          value={selectedFridge}
+          onChange={(e) => setSelectedFridge(e.target.value)}
+          style={{ width: "100%", padding: "8px" }}
+        >
+          {fridges.map((f) => (
+            <option key={f.fridge_id} value={f.fridge_id}>
+              {f.fridge_name}
+            </option>
+          ))}
+        </select>
+        <p className="text-muted" style={{ marginTop: 8 }}>
+          Orders will be associated with this fridge
+        </p>
+      </div>
 
       {/* ================= Add Item ================= */}
       <div className="panel">
@@ -262,39 +358,51 @@ export default function ShoppingListPage() {
 
       {/* ================= Shopping List ================= */}
       <div className="panel">
-        <h2>Current Shopping List</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Current Shopping List</h2>
+          {items.length > 0 && (
+            <button className="btn-primary" onClick={handleCheckoutAll}>
+              🛒 Checkout All ({items.length} items)
+            </button>
+          )}
+        </div>
 
         {items.length === 0 ? (
           <p>No items.</p>
         ) : (
-          <ul className="list">
-            {items.map((it) => (
-              <li key={it.ingredient_id} className="list-item">
-                <div>
-                  <strong>{it.ingredient_name}</strong> — {it.quantity_to_buy}{" "}
-                  {it.standard_unit}
-                  <div className="text-muted">
-                    Needed by: {formatDate(it.needed_by)}
+          <>
+            <p className="text-muted" style={{ marginTop: 8, marginBottom: 12 }}>
+              Click "Checkout All" to automatically create orders split by partner with cheapest prices.
+            </p>
+            <ul className="list">
+              {items.map((it) => (
+                <li key={it.ingredient_id} className="list-item">
+                  <div>
+                    <strong>{it.ingredient_name}</strong> — {it.quantity_to_buy}{" "}
+                    {it.standard_unit}
+                    <div className="text-muted">
+                      Needed by: {formatDate(it.needed_by)}
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <button
-                    className="btn-secondary"
-                    onClick={() => showRecommendations(it)}
-                  >
-                    Recommend
-                  </button>
-                  <button
-                    className="btn-link danger"
-                    onClick={() => handleRemove(it.ingredient_id)}
-                  >
-                    remove
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  <div>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => showRecommendations(it)}
+                    >
+                      Recommend
+                    </button>
+                    <button
+                      className="btn-link danger"
+                      onClick={() => handleRemove(it.ingredient_id)}
+                    >
+                      remove
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
@@ -405,23 +513,6 @@ export default function ShoppingListPage() {
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* ================= Select Fridge ================= */}
-      {orderItems.length > 0 && (
-        <div className="panel">
-          <h2>Select a Fridge</h2>
-          <select
-            value={selectedFridge}
-            onChange={(e) => setSelectedFridge(e.target.value)}
-          >
-            {fridges.map((f) => (
-              <option key={f.fridge_id} value={f.fridge_id}>
-                {f.fridge_name}
-              </option>
-            ))}
-          </select>
         </div>
       )}
 
