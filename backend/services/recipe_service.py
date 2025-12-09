@@ -483,3 +483,35 @@ class RecipeService:
             )
 
         return plans
+
+    @staticmethod
+    async def delete_meal_plan(
+        plan_id: int,
+        current_user_id: UUID,
+        session: AsyncSession
+    ) -> None:
+        """
+        Delete a meal plan.
+
+        Users can only delete their own meal plans.
+        """
+        # Check if meal plan exists and belongs to user
+        result = await session.execute(
+            select(MealPlan).where(
+                and_(
+                    MealPlan.plan_id == plan_id,
+                    MealPlan.user_id == current_user_id
+                )
+            )
+        )
+        plan = result.scalar_one_or_none()
+
+        if not plan:
+            raise HTTPException(
+                status_code=404,
+                detail="Meal plan not found or you don't have permission to delete it"
+            )
+
+        # Delete the meal plan
+        await session.delete(plan)
+        await session.commit()
