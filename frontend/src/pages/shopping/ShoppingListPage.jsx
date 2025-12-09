@@ -7,19 +7,98 @@ import {
   getRecommendations,
   createOrder,
 } from "../../api/shopping";
+import { getUserFridges } from "../../api/fridge";
 
-import { getUserFridges } from "../../api/fridge"; // ⬅ 新增：取得使用者冰箱
+// ===============================
+// Helpers
+// ===============================
 
+// 金額格式化
+const formatPrice = (value) => {
+  if (value === null || value === undefined || value === "") return "-";
+  try {
+    const num = Number(value);
+    if (Number.isNaN(num)) return value;
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return value;
+  }
+};
+
+// 日期格式化
+const formatDate = (isoStr) => {
+  if (!isoStr) return "-";
+  try {
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return isoStr;
+    return d.toLocaleDateString("en-CA");
+  } catch {
+    return isoStr;
+  }
+};
+
+// 比較到貨是否來得及
+const isInTime = (expectedArrival, neededBy) => {
+  if (!expectedArrival || !neededBy) return false;
+  return new Date(expectedArrival).getTime() <= new Date(neededBy).getTime();
+};
+
+// 需要多少個 item（無條件進位）
+const itemsNeeded = (neededQty, unitQty) => {
+  const need = Number(String(neededQty).match(/[\d.]+/));
+  const per = Number(String(unitQty).match(/[\d.]+/));
+
+  if (Number.isNaN(need) || Number.isNaN(per) || per === 0) return "-";
+  return Math.ceil(need / per);
+};
+
+// 一個商品單位是多少標準單位（100 g, 250 ml, 20 pcs）
+const standardPerItem = (unitQty, stdUnit) => {
+  const qty = Number(String(unitQty).match(/[\d.]+/));
+  if (Number.isNaN(qty)) return "-";
+  return `${qty} ${stdUnit}`;
+};
+
+// 單位價格（每標準單位成本）
+const pricePerUnit = (price, unitQty) => {
+  const p = Number(price);
+  const u = Number(String(unitQty).match(/[\d.]+/));
+
+  if (Number.isNaN(p) || Number.isNaN(u) || u === 0) return "-";
+  return (p / u).toFixed(4);
+};
+
+const totalStandardUnits = (neededQty, unitQty, stdUnit) => {
+  const items = itemsNeeded(neededQty, unitQty);
+  const per = Number(String(unitQty).match(/[\d.]+/));
+  if (Number.isNaN(items) || Number.isNaN(per)) return "-";
+  return `${items * per} ${stdUnit}`;
+};
+
+const totalPriceForItem = (price, neededQty, unitQty) => {
+  const perItem = Number(price);
+  const items = itemsNeeded(neededQty, unitQty);
+
+  if (Number.isNaN(perItem) || Number.isNaN(items)) return "-";
+
+  return (perItem * items).toFixed(2); // 字串數字
+};
+
+
+
+// ===============================
+// Component
+// ===============================
 export default function ShoppingListPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   const [items, setItems] = useState([]);
-
-  // 訂單 preview
   const [orderItems, setOrderItems] = useState([]);
   const [orderResult, setOrderResult] = useState(null);
 
-  // Add Item Form
   const [newItem, setNewItem] = useState({
     ingredient_id: "",
     quantity_to_buy: 1,
@@ -29,70 +108,54 @@ export default function ShoppingListPage() {
   const [recData, setRecData] = useState(null);
   const [loadingRec, setLoadingRec] = useState(false);
 
-  // 🧊 使用者冰箱
   const [fridges, setFridges] = useState([]);
   const [selectedFridge, setSelectedFridge] = useState("");
 
-  const load = async () => {
+  // Load shopping list
+  const loadShoppingList = async () => {
     const data = await getShoppingList();
-    setItems(data);
+    setItems(data || []);
+  };
+
+  // Load fridges
+  const loadFridges = async () => {
+    const list = await getUserFridges();
+    setFridges(list || []);
+    if (list?.length > 0) setSelectedFridge(list[0].fridge_id);
   };
 
   useEffect(() => {
-    load();
-
-    // load fridges
-    const loadFridges = async () => {
-      const list = await getUserFridges();
-      setFridges(list);
-
-      // 預設第一個冰箱
-      if (list.length > 0) setSelectedFridge(list[0].fridge_id);
-    };
-
+    loadShoppingList();
     loadFridges();
   }, []);
 
-  // -------------------------------
-  // ➕ Add Item to Shopping List
-  // -------------------------------
+  // Add item
   const handleAdd = async (e) => {
     e.preventDefault();
+    if (!newItem.ingredient_id) return alert("Please enter ingredient ID");
 
-    if (!newItem.ingredient_id) {
-      alert("Please enter ingredient ID");
-      return;
-    }
-
-    const payload = {
+    await addShoppingItem({
       ingredient_id: Number(newItem.ingredient_id),
       quantity_to_buy: Number(newItem.quantity_to_buy),
       needed_by: newItem.needed_by,
-    };
+    });
 
-    await addShoppingItem(payload);
-
-    // Reset form
     setNewItem({
       ingredient_id: "",
       quantity_to_buy: 1,
       needed_by: today,
     });
 
-    await load();
+    loadShoppingList();
   };
 
-  // -------------------------------
-  // 🗑 Remove Shopping Item
-  // -------------------------------
+  // Remove
   const handleRemove = async (ingredient_id) => {
     await removeShoppingItem(ingredient_id);
-    await load();
+    loadShoppingList();
   };
 
-  // -----------------------------------------------------
-  // 🔍 顯示 Product Recommendations
-  // -----------------------------------------------------
+  // Show recommendations
   const showRecommendations = async (it) => {
     setLoadingRec(true);
     try {
@@ -104,44 +167,50 @@ export default function ShoppingListPage() {
       setRecData(res);
     } catch (err) {
       console.error(err);
-      alert("Failed to fetch product recommendations");
+      alert("Failed to fetch recommendations");
     }
     setLoadingRec(false);
   };
 
-  // -----------------------------------------------------
-  // ➕ 加入 Order Preview
-  // -----------------------------------------------------
-  const addOrderItem = (product) => {
-    setOrderItems((prev) => [...prev, product]);
-  };
+  // Which product is recommended?
+  const recommendedProduct = (() => {
+    if (!recData?.products?.length) return null;
 
-  // -----------------------------------------------------
-  // 🛒 提交訂單（加入 fridge 選擇）
-  // -----------------------------------------------------
+    // backend provided
+    const backend = recData.products.find((p) => p.is_recommended);
+    if (backend) return backend;
+
+    // else choose cheapest in-time
+    const inTimeProducts = recData.products.filter((p) =>
+      isInTime(p.expected_arrival, recData.needed_by)
+    );
+
+    if (!inTimeProducts.length) return null;
+
+    return inTimeProducts.reduce((best, p) =>
+      Number(p.current_price) < Number(best.current_price) ? p : best
+    );
+  })();
+
+  // Add to order
+  const addOrderItem = (p) => setOrderItems((prev) => [...prev, p]);
+
+  // Submit order
   const submitOrder = async () => {
-    if (!selectedFridge) {
-      alert("Please select a fridge before ordering.");
-      return;
-    }
-
-    if (orderItems.length === 0) {
-      alert("No items selected for order.");
-      return;
-    }
+    if (!selectedFridge) return alert("Select a fridge first.");
+    if (!orderItems.length) return alert("No items selected.");
 
     const payload = {
-      fridge_id: selectedFridge, // ⬅ 使用者選的冰箱
+      fridge_id: selectedFridge,
       items: orderItems.map((p) => ({
         external_sku: p.external_sku,
-        partner_id: p.partner_id, // 後端需要 partner_id!
+        partner_id: p.partner_id,
         quantity: 1,
       })),
     };
 
     const result = await createOrder(payload);
     setOrderResult(result);
-
     setOrderItems([]);
     setRecData(null);
   };
@@ -150,71 +219,205 @@ export default function ShoppingListPage() {
     <div className="page">
       <h1>Shopping List</h1>
 
-      {/* Add New Item */}
-      <form onSubmit={handleAdd} className="inline-form">
-        {/* existing input fields... */}
+      {/* ================= Add Item ================= */}
+      <div className="panel">
+        <h2>Add Item</h2>
+        <form onSubmit={handleAdd} className="inline-form">
+          <label>
+            Ingredient ID
+            <input
+              type="number"
+              value={newItem.ingredient_id}
+              onChange={(e) =>
+                setNewItem({ ...newItem, ingredient_id: e.target.value })
+              }
+            />
+          </label>
 
-        <button className="btn-primary">Add</button>
-      </form>
+          <label>
+            Quantity to buy
+            <input
+              type="number"
+              value={newItem.quantity_to_buy}
+              onChange={(e) =>
+                setNewItem({ ...newItem, quantity_to_buy: e.target.value })
+              }
+            />
+          </label>
 
-      {/* Shopping List Items */}
-      <ul className="list">
-        {items.map((it) => (
-          <li key={it.ingredient_id} className="list-item">
-            <span>
-              <strong>{it.ingredient_name}</strong> — {it.quantity_to_buy}{" "}
-              {it.standard_unit} (need by {it.needed_by})
-            </span>
+          <label>
+            Needed by
+            <input
+              type="date"
+              value={newItem.needed_by}
+              onChange={(e) =>
+                setNewItem({ ...newItem, needed_by: e.target.value })
+              }
+            />
+          </label>
 
-            <button
-              className="btn-secondary"
-              onClick={() => showRecommendations(it)}
-            >
-              Recommend Products
-            </button>
+          <button className="btn-primary">Add</button>
+        </form>
+      </div>
 
-            <button
-              className="btn-link danger"
-              onClick={() => handleRemove(it.ingredient_id)}
-            >
-              remove
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* ================= Shopping List ================= */}
+      <div className="panel">
+        <h2>Current Shopping List</h2>
 
-      {/* Recommendation Panel */}
-      {recData && (
-        <div className="panel">
-          <h3>Recommended Products</h3>
+        {items.length === 0 ? (
+          <p>No items.</p>
+        ) : (
+          <ul className="list">
+            {items.map((it) => (
+              <li key={it.ingredient_id} className="list-item">
+                <div>
+                  <strong>{it.ingredient_name}</strong> — {it.quantity_to_buy}{" "}
+                  {it.standard_unit}
+                  <div className="text-muted">
+                    Needed by: {formatDate(it.needed_by)}
+                  </div>
+                </div>
 
-          <ul>
-            {recData.products.map((p, idx) => (
-              <li key={idx}>
-                <strong>{p.product_name}</strong> — ${p.current_price} <br />
-                Partner: {p.partner_name} <br />
-                <button className="btn-primary" onClick={() => addOrderItem(p)}>
-                  Add to Order Preview
-                </button>
+                <div>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => showRecommendations(it)}
+                  >
+                    Recommend
+                  </button>
+                  <button
+                    className="btn-link danger"
+                    onClick={() => handleRemove(it.ingredient_id)}
+                  >
+                    remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      {/* ================= Recommendations ================= */}
+      {loadingRec && (
+        <div className="panel">
+          <p>Loading...</p>
         </div>
       )}
 
-      {/* -------------------------------------------------- */}
-      {/* 🧊 冰箱選擇器 — 新增 */}
-      {/* -------------------------------------------------- */}
+      {recData && !loadingRec && (
+        <div className="panel">
+          <h2>Recommended Products</h2>
+
+          <p className="text-muted">
+            Ingredient: <strong>{recData.ingredient_name}</strong>
+            <br />
+            Needed:{" "}
+            <strong>
+              {recData.quantity_needed}{" "}
+              {recData.products[0]?.standard_unit || ""}
+            </strong>
+            <br />
+            Needed by: {formatDate(recData.needed_by)}
+          </p>
+
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Partner</th>
+                <th>Total Price</th>
+
+                <th>Items needed</th>
+                <th>Standard per item</th>
+                <th>Price per item</th>
+                {/* <th>Unit</th> */}
+
+                <th>Shipping</th>
+                <th>Arrival</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {recData.products.map((p) => {
+                const inTime = isInTime(p.expected_arrival, recData.needed_by);
+                const recommended =
+                  recommendedProduct &&
+                  p.external_sku === recommendedProduct.external_sku &&
+                  p.partner_id === recommendedProduct.partner_id;
+
+                return (
+                  <tr key={`${p.external_sku}-${p.partner_id}`}>
+                    <td>
+                      <strong>{p.product_name}</strong>
+                      {recommended && (
+                        <span style={{ marginLeft: 6, color: "#f5c518" }}>⭐</span>
+                      )}
+                    </td>
+                    <td>{p.partner_name}</td>
+                    <td>
+                      ${totalPriceForItem(
+                        p.current_price,
+                        recData.quantity_needed,
+                        p.unit_quantity
+                      )}
+                    </td>
+
+
+                    <td>
+                      {itemsNeeded(
+                        recData.quantity_needed,
+                        p.unit_quantity
+                      )}
+                    </td>
+
+                    <td>
+                      {standardPerItem(p.unit_quantity, p.standard_unit)}
+                    </td>
+
+                    <td>{formatPrice(p.current_price)}</td>
+
+                    {/* <td>{p.standard_unit}</td> */}
+
+                    <td>{p.avg_shipping_days}</td>
+                    <td>{formatDate(p.expected_arrival)}</td>
+
+                    <td>
+                      {inTime ? (
+                        <span className="badge badge-success">In time</span>
+                      ) : (
+                        <span className="badge badge-warning">Late</span>
+                      )}
+                    </td>
+
+                    <td>
+                      <button
+                        className="btn-primary"
+                        onClick={() => addOrderItem(p)}
+                      >
+                        Add
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ================= Select Fridge ================= */}
       {orderItems.length > 0 && (
         <div className="panel">
-          <h3>Select a Fridge</h3>
-
+          <h2>Select a Fridge</h2>
           <select
             value={selectedFridge}
             onChange={(e) => setSelectedFridge(e.target.value)}
           >
             {fridges.map((f) => (
-              <option value={f.fridge_id} key={f.fridge_id}>
+              <option key={f.fridge_id} value={f.fridge_id}>
                 {f.fridge_name}
               </option>
             ))}
@@ -222,17 +425,45 @@ export default function ShoppingListPage() {
         </div>
       )}
 
-      {/* Order Preview */}
+      {/* ================= Order Preview ================= */}
       {orderItems.length > 0 && (
         <div className="panel">
-          <h3>Order Preview</h3>
-          <ul>
-            {orderItems.map((p, idx) => (
-              <li key={idx}>
-                {p.product_name} — {p.partner_name}
-              </li>
-            ))}
+          <h2>Order Preview</h2>
+
+          <ul className="list">
+            {orderItems.map((p, i) => {
+              // 從 recData 抓出需要量 & 標準單位
+              const neededQty = recData?.quantity_needed ?? null;
+              const stdUnit = p.standard_unit;
+
+              return (
+                <li key={i}>
+                  <strong>{p.product_name}</strong> — {p.partner_name} (<span style={{ fontWeight: 500 }}>${formatPrice(p.current_price)} per item</span>)
+                  <div className="text-muted">
+                    Total Price: $
+                    {totalPriceForItem(
+                      p.current_price,
+                      neededQty,
+                      p.unit_quantity
+                    )}
+                  </div>
+                  <div className="text-muted">
+                    Items needed:{" "}
+                    {itemsNeeded(neededQty, p.unit_quantity)} item(s)
+                  </div>
+                  <div className="text-muted">
+                    Total:{" "}
+                    {totalStandardUnits(
+                      neededQty,
+                      p.unit_quantity,
+                      stdUnit
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
+
 
           <button className="btn-primary" onClick={submitOrder}>
             Submit Order
@@ -240,12 +471,12 @@ export default function ShoppingListPage() {
         </div>
       )}
 
-      {/* Order Result */}
+      {/* ================= Order Result ================= */}
       {orderResult && (
         <div className="panel">
-          <h3>Order Created!</h3>
+          <h2>Order Created!</h2>
           <p>ID: {orderResult.order_id}</p>
-          <p>Total: {orderResult.total_price}</p>
+          <p>Total: ${formatPrice(orderResult.total_price)}</p>
           <p>Status: {orderResult.order_status}</p>
 
           <button className="btn-link" onClick={() => setOrderResult(null)}>

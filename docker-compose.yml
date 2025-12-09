@@ -76,6 +76,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # environment:
+    #   ME_CONFIG_MONGODB_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME:-root}:${MONGO_INITDB_ROOT_PASSWORD:-password}@mongodb:27017/
+    #   ME_CONFIG_BASICAUTH_USERNAME: admin
+    #   ME_CONFIG_BASICAUTH_PASSWORD: admin
     ports:
       - "8081:8081"
     networks:
