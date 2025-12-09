@@ -470,6 +470,80 @@ async def generate_partners_and_products(session: AsyncSession, ingredient_ids):
     print(f"✓ Created {len(products_data)} products")
     return partner_ids
 
+async def generate_orders(session: AsyncSession, user_ids, partner_ids):
+    """Generate orders and items."""
+    print(f"Generating {NUM_ORDERS} orders...")
+    
+    # Pre-fetch products by partner for fast lookup
+    print("  Fetching products map...")
+    products_result = await session.execute(select(ExternalProduct))
+    products_by_partner = {}
+    for p in products_result.scalars().all():
+        if p.partner_id not in products_by_partner:
+            products_by_partner[p.partner_id] = []
+        products_by_partner[p.partner_id].append(p)
+        
+    orders_created = []
+    
+    for i in range(NUM_ORDERS):
+        user_id = random.choice(user_ids)
+        partner_id = random.choice(partner_ids)
+        
+        # Random date in last 90 days
+        order_date = datetime.utcnow() - timedelta(days=random.randint(0, 90))
+        status = random.choice(['Pending', 'Paid', 'Shipped', 'Delivered', 'Cancelled'])
+        
+        order = StoreOrder(
+            user_id=user_id,
+            partner_id=partner_id,
+            order_date=order_date,
+            expected_arrival=order_date + timedelta(days=3),
+            total_price=0, # Will update later
+            order_status=status
+        )
+        session.add(order)
+        orders_created.append(order)
+        
+        # Flush every batch to get IDs and create items
+        if len(orders_created) >= 100:
+            await session.flush()
+            
+            current_items_batch = []
+            
+            for o in orders_created[-100:]:
+                if o.partner_id not in products_by_partner: continue
+                
+                avail_products = products_by_partner[o.partner_id]
+                if not avail_products: continue
+                
+                # Randomly pick 1-5 products
+                num_items = random.randint(1, 5)
+                selected_products = random.sample(avail_products, min(len(avail_products), num_items))
+                
+                total = Decimal(0)
+                for prod in selected_products:
+                    qty = random.randint(1, 3)
+                    price = prod.current_price
+                    total += price * qty
+                    
+                    current_items_batch.append({
+                        "order_id": o.order_id,
+                        "external_sku": prod.external_sku,
+                        "partner_id": o.partner_id,
+                        "quantity": qty,
+                        "deal_price": price
+                    })
+                
+                o.total_price = total
+            
+            if current_items_batch:
+                await session.execute(insert(OrderItem), current_items_batch)
+                
+            orders_created = [] # Clear list
+            print(f"  Created {i+1} orders...")
+            
+    await session.commit()
+    print(f"✓ Created {NUM_ORDERS} orders")
 
 async def main():
     """Main generation script."""
@@ -502,9 +576,11 @@ async def main():
         
         await generate_meal_plans_optimized(session, user_ids, recipe_ids, fridge_ids)
         
-        await generate_partners_and_products(session, ingredient_ids)
+        # 1. 接收回傳的 partner_ids
+        partner_ids = await generate_partners_and_products(session, ingredient_ids)
         
-        # Skipping orders for brevity, logic similar to recipes
+        # 2. 呼叫剛剛新增的函式
+        await generate_orders(session, user_ids, partner_ids)
         
         await session.commit()
         

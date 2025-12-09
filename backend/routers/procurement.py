@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
+from collections import defaultdict  # <--- 修正 1: 補上這個缺少的引入
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from schemas.procurement import (
     ShoppingListAddRequest,
     ShoppingListItemResponse,
     OrderResponse,
+    OrderItemResponse,  # <--- 確保有引入 OrderItemResponse
     CreateOrdersResponse,
     OrderUpdateStatusRequest,
     MessageResponse,
@@ -529,24 +531,25 @@ async def admin_update_order_status(
 async def admin_get_all_orders(
     admin_user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-    user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
-    status_filter: Optional[str] = Query(None, description="Filter by order status")
+    user_id: Optional[UUID] = Query(None),
+    status_filter: Optional[str] = Query(None),
+    limit: int = Query(50, description="Pagination limit"),
+    offset: int = Query(0, description="Pagination offset")
 ):
     """
-    **[Admin Only]** View all orders in the system with optional filtering.
-
-    - Filter by user_id to see a specific user's orders
-    - Filter by status to see orders in a specific state
+    [Admin Only] Optimized view of all orders using single query.
     """
-    from sqlalchemy import select, and_
+    from sqlalchemy.orm import selectinload
     from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
-    from schemas.procurement import OrderItemResponse
+    from sqlalchemy import select
 
-    # Build query
+    # 1. Step 1: 撈出訂單主檔 (加上分頁)
     query = (
         select(StoreOrder, Partner)
         .join(Partner, StoreOrder.partner_id == Partner.partner_id)
         .order_by(StoreOrder.order_date.desc())
+        .limit(limit)
+        .offset(offset)
     )
 
     if user_id:
@@ -555,28 +558,50 @@ async def admin_get_all_orders(
         query = query.where(StoreOrder.order_status == status_filter)
 
     result = await session.execute(query)
-    orders = result.all()
+    orders_data = result.all()  # [(Order, Partner), ...]
 
+    if not orders_data:
+        return []
+
+    # 2. Step 2: 收集所有 Order ID
+    order_ids = [row[0].order_id for row in orders_data]
+
+    # 3. Step 3: 一次撈出這些訂單的所有明細 (Batch Query)
+    items_query = (
+        select(OrderItem, ExternalProduct)
+        .join(ExternalProduct, 
+              (OrderItem.partner_id == ExternalProduct.partner_id) & 
+              (OrderItem.external_sku == ExternalProduct.external_sku))
+        .where(OrderItem.order_id.in_(order_ids))
+    )
+    
+    items_result = await session.execute(items_query)
+    all_items = items_result.all()
+
+    # 4. Step 4: 在記憶體中將 Item 分配給 Order
+    items_map = defaultdict(list)
+    for item, product in all_items:
+        items_map[item.order_id].append({
+            "item": item,
+            "product": product
+        })
+
+    # 5. Step 5: 組裝回應
     order_responses = []
-    for order, partner in orders:
-        # Get order items
-        items_result = await session.execute(
-            select(OrderItem, ExternalProduct)
-            .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
-            .where(OrderItem.order_id == order.order_id)
-        )
-        items = items_result.all()
-
+    for order, partner in orders_data:
+        # 從記憶體 Map 中取得明細
+        order_items = items_map.get(order.order_id, [])
+        
         item_responses = [
             OrderItemResponse(
-                external_sku=item.external_sku,
-                product_name=product.product_name,
+                external_sku=entry["item"].external_sku,
+                product_name=entry["product"].product_name,
                 partner_name=partner.partner_name,
-                quantity=item.quantity,
-                deal_price=item.deal_price,
-                subtotal=item.deal_price * item.quantity
+                quantity=entry["item"].quantity,
+                deal_price=entry["item"].deal_price,
+                subtotal=entry["item"].deal_price * entry["item"].quantity
             )
-            for item, product in items
+            for entry in order_items
         ]
 
         order_responses.append(
