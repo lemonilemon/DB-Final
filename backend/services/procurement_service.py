@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict
+from typing import List, Dict, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -652,7 +652,7 @@ class ProcurementService:
                 fridge_id=order.fridge_id,
                 ingredient_id=product.ingredient_id,
                 quantity=standard_quantity,
-                entry_date=today,  # ⭐ 必加
+                entry_date=today,
                 expiry_date=expiry_date
             )
             session.add(fridge_item)
@@ -671,48 +671,48 @@ class ProcurementService:
         [Admin] Update order status with state machine validation.
 
         When status is changed to "Delivered", automatically adds items to fridge.
-
-        Uses pessimistic locking to prevent race conditions.
         """
-        from core.order_status import OrderStatusManager
+        try:
+            from core.order_status import OrderStatusManager
 
-        # Use pessimistic locking to prevent concurrent status changes
-        result = await session.execute(
-            select(StoreOrder)
-            .where(StoreOrder.order_id == order_id)
-            .with_for_update()  # Lock the row until transaction completes
-        )
-        order = result.scalar_one_or_none()
+            result = await session.execute(
+                select(StoreOrder).where(StoreOrder.order_id == order_id)
+            )
+            order = result.scalar_one_or_none()
 
-        if not order:
-            raise HTTPException(status_code=404, detail="Order not found")
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
 
-        # After acquiring lock, re-check status and validate transition
-        OrderStatusManager.validate_transition(
-            current_status=order.order_status,
-            new_status=request.order_status,
-            role="admin"
-        )
-
-        old_status = order.order_status
-        order.order_status = request.order_status
-        session.add(order)
-
-        # If order is being marked as delivered, add items to fridge
-        if request.order_status == "Delivered" and old_status != "Delivered":
-            items_added = await ProcurementService.add_delivered_order_to_fridge(
-                order, session
+            # Validate transition using state machine (admin role)
+            OrderStatusManager.validate_transition(
+                current_status=order.order_status,
+                new_status=request.order_status,
+                role="admin"
             )
 
-            # Update meal plan statuses for this fridge (new inventory may make plans "Ready")
-            if order.fridge_id:
-                await ProcurementService.update_meal_plan_statuses(
-                    order.fridge_id, session
+            old_status = order.order_status
+            order.order_status = request.order_status
+            session.add(order)
+
+            # If order is being marked as delivered, add items to fridge
+            if request.order_status == "Delivered" and old_status != "Delivered":
+                items_added = await ProcurementService.add_delivered_order_to_fridge(
+                    order, session
                 )
 
-        await session.commit()
+                # Update meal plan statuses for this fridge (new inventory may make plans "Ready")
+                if order.fridge_id:
+                    await ProcurementService.update_meal_plan_statuses(
+                        order.fridge_id, session
+                    )
 
-        return order
+            await session.commit()
+
+            return order
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error updating order status: {str(e)}")
 
     # ========================================================================
     # Availability Check
@@ -723,228 +723,233 @@ class ProcurementService:
         recipe_id: int,
         fridge_id: UUID,
         needed_by: date,
-        session: AsyncSession
+        session: AsyncSession,
+        exclude_plan_id: Optional[int] = None
     ) -> AvailabilityCheckResponse:
         """
         Check if ingredients are available for a recipe using timeline simulation.
-
-        Algorithm (O(N log N) per ingredient):
-        1. Collect all events (inventory additions, expirations, meal plans)
-        2. Sort events by date
-        3. Simulate timeline chronologically
-        4. Check if quantity goes negative at any point
-
-        Considers events within 14 days for simplicity.
         """
-        # Get recipe requirements
-        requirements_result = await session.execute(
-            select(RecipeRequirement, Ingredient)
-            .join(Ingredient, RecipeRequirement.ingredient_id == Ingredient.ingredient_id)
-            .where(RecipeRequirement.recipe_id == recipe_id)
-        )
-        requirements = requirements_result.all()
+        try:
+            # Get recipe requirements
+            requirements_result = await session.execute(
+                select(RecipeRequirement, Ingredient)
+                .join(Ingredient, RecipeRequirement.ingredient_id == Ingredient.ingredient_id)
+                .where(RecipeRequirement.recipe_id == recipe_id)
+            )
+            requirements = requirements_result.all()
 
-        if not requirements:
-            raise HTTPException(status_code=404, detail="Recipe not found or has no requirements")
+            if not requirements:
+                raise HTTPException(status_code=404, detail="Recipe not found or has no requirements")
 
-        # Get all users who have access to this fridge
-        from models.fridge import FridgeAccess
+            # Get all users who have access to this fridge
+            from models.fridge import FridgeAccess
 
-        fridge_users_result = await session.execute(
-            select(FridgeAccess.user_id)
-            .where(FridgeAccess.fridge_id == fridge_id)
-        )
-        fridge_user_ids = [row[0] for row in fridge_users_result.all()]
+            fridge_users_result = await session.execute(
+                select(FridgeAccess.user_id)
+                .where(FridgeAccess.fridge_id == fridge_id)
+            )
+            fridge_user_ids = [row[0] for row in fridge_users_result.all()]
 
-        # Get meal plans within 14 days
-        today = date.today()
-        cutoff_date = today + timedelta(days=14)
+            # Get meal plans within 14 days
+            today = date.today()
+            cutoff_date = today + timedelta(days=14)
 
-        meal_plans_result = await session.execute(
-            select(MealPlan)
-            .where(
+            # Build query
+            query = select(MealPlan).where(
                 and_(
                     MealPlan.user_id.in_(fridge_user_ids),
                     MealPlan.planned_date >= datetime.combine(today, datetime.min.time()),
                     MealPlan.planned_date <= datetime.combine(cutoff_date, datetime.max.time())
                 )
             )
-            .order_by(MealPlan.planned_date.asc())  # Sort by date for timeline simulation
-        )
-        meal_plans = meal_plans_result.scalars().all()
 
-        missing_ingredients = []
+            # Exclude specific plan if requested (to avoid double counting during updates)
+            if exclude_plan_id:
+                query = query.where(MealPlan.plan_id != exclude_plan_id)
 
-        for requirement, ingredient in requirements:
-            # Get current fridge items (batches with quantities and expiry dates)
-            items_result = await session.execute(
-                select(FridgeItem)
-                .where(
-                    and_(
-                        FridgeItem.fridge_id == fridge_id,
-                        FridgeItem.ingredient_id == requirement.ingredient_id,
-                        FridgeItem.expiry_date >= today
-                    )
-                )
-                .order_by(FridgeItem.expiry_date.asc())  # Sort by expiry (for FIFO)
-            )
-            items = items_result.scalars().all()
+            query = query.order_by(MealPlan.planned_date.asc())
 
-            # Initialize batches (list of [quantity, expiry_date])
-            batches = [[item.quantity, item.expiry_date] for item in items]
+            meal_plans_result = await session.execute(query)
+            meal_plans = meal_plans_result.scalars().all()
 
-            # Get pending/shipped orders for this ingredient (within 14 days)
-            from models.procurement import StoreOrder, OrderItem
+            missing_ingredients = []
 
-            pending_orders_result = await session.execute(
-                select(OrderItem, StoreOrder, ExternalProduct)
-                .join(StoreOrder, OrderItem.order_id == StoreOrder.order_id)
-                .join(
-                    ExternalProduct,
-                    and_(
-                        OrderItem.partner_id == ExternalProduct.partner_id,
-                        OrderItem.external_sku == ExternalProduct.external_sku
-                    )
-                )
-                .where(
-                    and_(
-                        ExternalProduct.ingredient_id == requirement.ingredient_id,
-                        StoreOrder.fridge_id == fridge_id,
-                        StoreOrder.order_status.in_(["Pending", "Processing", "Shipped"]),
-                        StoreOrder.expected_arrival.isnot(None),
-                        StoreOrder.expected_arrival >= today,
-                        StoreOrder.expected_arrival <= cutoff_date
-                    )
-                )
-                .order_by(StoreOrder.expected_arrival.asc())  # Sort by arrival date
-            )
-
-            # Collect arrival events (add to batches on arrival date)
-            arrival_events = []  # List of (arrival_date, quantity_in_standard_unit, expiry_date)
-            for order_item, order, product in pending_orders_result.all():
-                # Convert selling_unit to standard_unit
-                standard_quantity = order_item.quantity * product.unit_quantity
-
-                # Assume ingredients expire 7 days after arrival (configurable)
-                assumed_expiry = order.expected_arrival + timedelta(days=7)
-
-                arrival_events.append((
-                    order.expected_arrival,
-                    standard_quantity,
-                    assumed_expiry
-                ))
-
-            # Collect consumption events
-            consumption_events = []  # List of (date, quantity_to_consume)
-
-            # Event 1: Future meal plan consumptions
-            for meal_plan in meal_plans:
-                plan_req_result = await session.execute(
-                    select(RecipeRequirement)
+            for requirement, ingredient in requirements:
+                # Get current fridge items (batches with quantities and expiry dates)
+                items_result = await session.execute(
+                    select(FridgeItem)
                     .where(
                         and_(
-                            RecipeRequirement.recipe_id == meal_plan.recipe_id,
-                            RecipeRequirement.ingredient_id == requirement.ingredient_id
+                            FridgeItem.fridge_id == fridge_id,
+                            FridgeItem.ingredient_id == requirement.ingredient_id,
+                            FridgeItem.expiry_date >= today
                         )
                     )
+                    .order_by(FridgeItem.expiry_date.asc())  # Sort by expiry (for FIFO)
                 )
-                plan_req = plan_req_result.scalar_one_or_none()
+                items = items_result.scalars().all()
 
-                if plan_req:
-                    plan_date = meal_plan.planned_date.date() if isinstance(meal_plan.planned_date, datetime) else meal_plan.planned_date
-                    consumption_events.append((plan_date, plan_req.quantity_needed))
+                # Initialize batches (list of [quantity, expiry_date])
+                batches = [[item.quantity, item.expiry_date] for item in items]
 
-            # Event 2: This recipe's consumption at needed_by
-            consumption_events.append((needed_by, requirement.quantity_needed))
+                # Get pending/shipped orders for this ingredient (within 14 days)
+                from models.procurement import StoreOrder, OrderItem
 
-            # Merge arrival and consumption events
-            all_events = []
-            for date, qty in consumption_events:
-                all_events.append(("consume", date, qty))
-            for date, qty, expiry in arrival_events:
-                all_events.append(("arrive", date, qty, expiry))
-
-            # Sort all events by date chronologically
-            all_events.sort(key=lambda x: x[1])
-
-            # Simulate timeline with FIFO consumption and arrivals
-            current_quantity = Decimal(0)
-            min_quantity = Decimal(0)
-            first_shortage_date = None
-
-            for event in all_events:
-                event_type = event[0]
-                event_date = event[1]
-
-                if event_type == "arrive":
-                    # Arrival event: Add new batch to inventory
-                    arrival_quantity = event[2]
-                    arrival_expiry = event[3]
-                    batches.append([arrival_quantity, arrival_expiry])
-                    # Re-sort batches by expiry (maintain FIFO order)
-                    batches.sort(key=lambda x: x[1])
-                    continue
-
-                # Consumption event
-                quantity_to_consume = event[2]
-                # Remove expired batches before this event
-                batches = [[qty, exp] for qty, exp in batches if exp >= event_date]
-
-                # Calculate total available before consumption
-                current_quantity = sum(qty for qty, _ in batches)
-
-                # Consume using FIFO (earliest expiry first)
-                remaining = quantity_to_consume
-                new_batches = []
-
-                for qty, exp in batches:
-                    if remaining <= 0:
-                        # No more to consume, keep this batch
-                        new_batches.append([qty, exp])
-                    elif qty <= remaining:
-                        # Consume entire batch
-                        remaining -= qty
-                    else:
-                        # Partially consume batch
-                        new_batches.append([qty - remaining, exp])
-                        remaining = Decimal(0)
-
-                batches = new_batches
-
-                # Calculate quantity after consumption
-                current_quantity = sum(qty for qty, _ in batches)
-
-                # If consumption failed (couldn't get enough), quantity goes negative
-                if remaining > 0:
-                    current_quantity -= remaining
-
-                # Track minimum quantity and when it first goes negative
-                if current_quantity < min_quantity:
-                    min_quantity = current_quantity
-                    if current_quantity < 0 and first_shortage_date is None:
-                        first_shortage_date = event_date
-
-            # Only add to missing ingredients if there's a shortage
-            if min_quantity < 0:
-                shortage = abs(min_quantity)
-
-                missing_ingredients.append(
-                    IngredientAvailability(
-                        ingredient_id=ingredient.ingredient_id,
-                        ingredient_name=ingredient.name,
-                        standard_unit=ingredient.standard_unit,
-                        shortage=shortage,
-                        needed_by=first_shortage_date
+                pending_orders_result = await session.execute(
+                    select(OrderItem, StoreOrder, ExternalProduct)
+                    .join(StoreOrder, OrderItem.order_id == StoreOrder.order_id)
+                    .join(
+                        ExternalProduct,
+                        and_(
+                            OrderItem.partner_id == ExternalProduct.partner_id,
+                            OrderItem.external_sku == ExternalProduct.external_sku
+                        )
                     )
+                    .where(
+                        and_(
+                            ExternalProduct.ingredient_id == requirement.ingredient_id,
+                            StoreOrder.fridge_id == fridge_id,
+                            StoreOrder.order_status.in_(["Pending", "Processing", "Shipped"]),
+                            StoreOrder.expected_arrival.isnot(None),
+                            StoreOrder.expected_arrival >= today,
+                            StoreOrder.expected_arrival <= cutoff_date
+                        )
+                    )
+                    .order_by(StoreOrder.expected_arrival.asc())  # Sort by arrival date
                 )
 
-        all_available = len(missing_ingredients) == 0
+                # Collect arrival events (add to batches on arrival date)
+                arrival_events = []  # List of (arrival_date, quantity_in_standard_unit, expiry_date)
+                for order_item, order, product in pending_orders_result.all():
+                    # Convert selling_unit to standard_unit
+                    standard_quantity = order_item.quantity * product.unit_quantity
 
-        return AvailabilityCheckResponse(
-            all_available=all_available,
-            missing_ingredients=missing_ingredients,
-            message=f"All ingredients available" if all_available else f"{len(missing_ingredients)} ingredient(s) insufficient"
-        )
+                    # Assume ingredients expire 7 days after arrival (configurable)
+                    assumed_expiry = order.expected_arrival + timedelta(days=7)
+
+                    arrival_events.append((
+                        order.expected_arrival,
+                        standard_quantity,
+                        assumed_expiry
+                    ))
+
+                # Collect consumption events
+                consumption_events = []  # List of (date, quantity_to_consume)
+
+                # Event 1: Future meal plan consumptions
+                for meal_plan in meal_plans:
+                    plan_req_result = await session.execute(
+                        select(RecipeRequirement)
+                        .where(
+                            and_(
+                                RecipeRequirement.recipe_id == meal_plan.recipe_id,
+                                RecipeRequirement.ingredient_id == requirement.ingredient_id
+                            )
+                        )
+                    )
+                    plan_req = plan_req_result.scalar_one_or_none()
+
+                    if plan_req:
+                        plan_date = meal_plan.planned_date.date() if isinstance(meal_plan.planned_date, datetime) else meal_plan.planned_date
+                        consumption_events.append((plan_date, plan_req.quantity_needed))
+
+                # Event 2: This recipe's consumption at needed_by
+                consumption_events.append((needed_by, requirement.quantity_needed))
+
+                # Merge arrival and consumption events
+                all_events = []
+                for date_obj, qty in consumption_events:
+                    all_events.append(("consume", date_obj, qty))
+                for date_obj, qty, expiry in arrival_events:
+                    all_events.append(("arrive", date_obj, qty, expiry))
+
+                # Sort all events by date chronologically
+                all_events.sort(key=lambda x: x[1])
+
+                # Simulate timeline with FIFO consumption and arrivals
+                current_quantity = Decimal(0)
+                min_quantity = Decimal(0)
+                first_shortage_date = None
+
+                for event in all_events:
+                    event_type = event[0]
+                    event_date = event[1]
+
+                    if event_type == "arrive":
+                        # Arrival event: Add new batch to inventory
+                        arrival_quantity = event[2]
+                        arrival_expiry = event[3]
+                        batches.append([arrival_quantity, arrival_expiry])
+                        # Re-sort batches by expiry (maintain FIFO order)
+                        batches.sort(key=lambda x: x[1])
+                        continue
+
+                    # Consumption event
+                    quantity_to_consume = event[2]
+                    # Remove expired batches before this event
+                    batches = [[qty, exp] for qty, exp in batches if exp >= event_date]
+
+                    # Calculate total available before consumption
+                    current_quantity = sum(qty for qty, _ in batches)
+
+                    # Consume using FIFO (earliest expiry first)
+                    remaining = quantity_to_consume
+                    new_batches = []
+
+                    for qty, exp in batches:
+                        if remaining <= 0:
+                            # No more to consume, keep this batch
+                            new_batches.append([qty, exp])
+                        elif qty <= remaining:
+                            # Consume entire batch
+                            remaining -= qty
+                        else:
+                            # Partially consume batch
+                            new_batches.append([qty - remaining, exp])
+                            remaining = Decimal(0)
+
+                    batches = new_batches
+
+                    # Calculate quantity after consumption
+                    current_quantity = sum(qty for qty, _ in batches)
+
+                    # If consumption failed (couldn't get enough), quantity goes negative
+                    if remaining > 0:
+                        current_quantity -= remaining
+
+                    # Track minimum quantity and when it first goes negative
+                    if current_quantity < min_quantity:
+                        min_quantity = current_quantity
+                        if current_quantity < 0 and first_shortage_date is None:
+                            first_shortage_date = event_date
+
+                # Only add to missing ingredients if there's a shortage
+                if min_quantity < 0:
+                    shortage = abs(min_quantity)
+
+                    missing_ingredients.append(
+                        IngredientAvailability(
+                            ingredient_id=ingredient.ingredient_id,
+                            ingredient_name=ingredient.name,
+                            standard_unit=ingredient.standard_unit,
+                            shortage=shortage,
+                            needed_by=first_shortage_date
+                        )
+                    )
+
+            all_available = len(missing_ingredients) == 0
+
+            return AvailabilityCheckResponse(
+                all_available=all_available,
+                missing_ingredients=missing_ingredients,
+                message=f"All ingredients available" if all_available else f"{len(missing_ingredients)} ingredient(s) insufficient"
+            )
+        except Exception as e:
+            return AvailabilityCheckResponse(
+                all_available=False,
+                missing_ingredients=[],
+                message=f"Error checking availability: {str(e)}"
+            )
 
     @staticmethod
     async def update_meal_plan_statuses(
@@ -999,14 +1004,16 @@ class ProcurementService:
                         recipe_id=plan.recipe_id,
                         fridge_id=fridge_id,
                         needed_by=plan_date,
-                        session=session
+                        session=session,
+                        exclude_plan_id=plan.plan_id
                     )
 
                     if availability.all_available:
                         plan.status = "Ready"
                     else:
                         plan.status = "Insufficient"
-                except:
+                except Exception as e:
+                    print(f"Error checking availability: {e}")
                     # If recipe not found or other error, mark as Planned
                     plan.status = "Planned"
 

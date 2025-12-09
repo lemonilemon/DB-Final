@@ -22,7 +22,7 @@ class OrderStatusManager:
 
     # Define valid status transitions (state machine)
     VALID_TRANSITIONS = {
-        "Pending": ["Processing", "Cancelled"],
+        "Pending": ["Processing", "Shipped", "Cancelled"],
         "Processing": ["Shipped", "Cancelled"],
         "Shipped": ["Delivered"],
         "Delivered": [],  # Terminal state
@@ -36,7 +36,7 @@ class OrderStatusManager:
     }
 
     PARTNER_ALLOWED_TRANSITIONS = {
-        "Pending": ["Processing", "Cancelled"],
+        "Pending": ["Processing", "Shipped", "Cancelled"],
         "Processing": ["Shipped", "Cancelled"],
         "Shipped": ["Delivered"],
     }
