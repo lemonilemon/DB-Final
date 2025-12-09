@@ -41,9 +41,17 @@ export default function AdminOrders() {
 
   const handleUpdate = async (orderId, newStatus) => {
     await updateOrderStatus(orderId, newStatus);
+
+    // 立即更新畫面，不等待 loadOrders()
+    setOrders(prev =>
+      prev.map(o =>
+        o.order_id === orderId ? { ...o, order_status: newStatus } : o
+      )
+    );
+
     alert("Order status updated!");
-    loadOrders();
   };
+
 
   // pagination calculation
   const totalPages =
