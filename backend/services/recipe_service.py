@@ -248,19 +248,22 @@ class RecipeService:
         # Get recipe details
         recipe_detail = await RecipeService.get_recipe_detail(recipe_id, session)
 
-        # Check all ingredients available first
+        # Query all fridge items ONCE (fix N+1 query problem)
+        all_items = await InventoryService.get_fridge_items(
+            request.fridge_id, current_user_id, session
+        )
+
+        # Build ingredient → quantity map in memory
+        ingredient_quantities = {}
+        for item in all_items:
+            if item.ingredient_id not in ingredient_quantities:
+                ingredient_quantities[item.ingredient_id] = Decimal(0)
+            ingredient_quantities[item.ingredient_id] += item.quantity
+
+        # Check all ingredients available
         insufficient_ingredients = []
         for req in recipe_detail.requirements:
-            # Get available quantity in fridge
-            items = await InventoryService.get_fridge_items(
-                request.fridge_id, current_user_id, session
-            )
-
-            available = sum(
-                item.quantity
-                for item in items
-                if item.ingredient_id == req.ingredient_id
-            )
+            available = ingredient_quantities.get(req.ingredient_id, Decimal(0))
 
             if available < req.quantity_needed:
                 insufficient_ingredients.append(
