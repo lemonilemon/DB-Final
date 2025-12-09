@@ -12,3 +12,12 @@ export async function createIngredient(data) {
   const res = await api.post("/ingredients", data);
   return res.data;
 }
+
+// 搜尋食材
+export const searchIngredients = async (query) => {
+  const res = await api.get(`/ingredients`, {
+    params: { search: query },
+  });
+  return res.data;
+};
+

@@ -526,60 +526,94 @@ async def admin_update_order_status(
     response_model=List[OrderResponse],
     summary="[Admin] View all orders"
 )
-async def admin_get_all_orders(
+@admin_order_router.get(
+    "",
+    summary="[Admin] View all orders (paginated)"
+)
+async def admin_get_all_orders_paginated(
     admin_user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
     user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
     status_filter: Optional[str] = Query(None, description="Filter by order status")
 ):
     """
-    **[Admin Only]** View all orders in the system with optional filtering.
-
-    - Filter by user_id to see a specific user's orders
-    - Filter by status to see orders in a specific state
+    Admin: Paginated order listing.
+    Returns only the requested page instead of ALL orders.
     """
-    from sqlalchemy import select, and_
-    from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
-    from schemas.procurement import OrderItemResponse
 
-    # Build query
-    query = (
+    from sqlalchemy import select, and_, func
+    from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
+    from schemas.procurement import OrderResponse, OrderItemResponse
+
+    # -------------------------
+    # Step 1: Build base query
+    # -------------------------
+    base_query = (
         select(StoreOrder, Partner)
         .join(Partner, StoreOrder.partner_id == Partner.partner_id)
-        .order_by(StoreOrder.order_date.desc())
     )
 
     if user_id:
-        query = query.where(StoreOrder.user_id == user_id)
+        base_query = base_query.where(StoreOrder.user_id == user_id)
     if status_filter:
-        query = query.where(StoreOrder.order_status == status_filter)
+        base_query = base_query.where(StoreOrder.order_status == status_filter)
 
-    result = await session.execute(query)
-    orders = result.all()
+    # -------------------------
+    # Step 2: Count total rows
+    # -------------------------
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
 
-    order_responses = []
-    for order, partner in orders:
-        # Get order items
-        items_result = await session.execute(
+    # -------------------------
+    # Step 3: Fetch paginated rows
+    # -------------------------
+    offset = (page - 1) * page_size
+
+    page_query = (
+        base_query
+        .order_by(StoreOrder.order_date.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+
+    results = await session.execute(page_query)
+    rows = results.all()
+
+    # -------------------------
+    # Step 4: Build order list
+    # -------------------------
+    order_list = []
+
+    for order, partner in rows:
+
+        items_query = await session.execute(
             select(OrderItem, ExternalProduct)
-            .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
+            .join(ExternalProduct,
+                  and_(
+                      OrderItem.partner_id == ExternalProduct.partner_id,
+                      OrderItem.external_sku == ExternalProduct.external_sku
+                  ))
             .where(OrderItem.order_id == order.order_id)
         )
-        items = items_result.all()
+
+        items = items_query.all()
 
         item_responses = [
             OrderItemResponse(
-                external_sku=item.external_sku,
-                product_name=product.product_name,
+                external_sku=oi.external_sku,
+                product_name=prod.product_name,
                 partner_name=partner.partner_name,
-                quantity=item.quantity,
-                deal_price=item.deal_price,
-                subtotal=item.deal_price * item.quantity
+                quantity=oi.quantity,
+                deal_price=oi.deal_price,
+                subtotal=oi.deal_price * oi.quantity
             )
-            for item, product in items
+            for oi, prod in items
         ]
 
-        order_responses.append(
+        order_list.append(
             OrderResponse(
                 order_id=order.order_id,
                 user_id=order.user_id,
@@ -593,4 +627,81 @@ async def admin_get_all_orders(
             )
         )
 
-    return order_responses
+    # -------------------------
+    # Step 5: Return paginated result
+    # -------------------------
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": order_list
+    }
+
+# async def admin_get_all_orders(
+#     admin_user: User = Depends(require_admin),
+#     session: AsyncSession = Depends(get_session),
+#     user_id: Optional[UUID] = Query(None, description="Filter by user ID"),
+#     status_filter: Optional[str] = Query(None, description="Filter by order status")
+# ):
+#     """
+#     **[Admin Only]** View all orders in the system with optional filtering.
+
+#     - Filter by user_id to see a specific user's orders
+#     - Filter by status to see orders in a specific state
+#     """
+#     from sqlalchemy import select, and_
+#     from models.procurement import StoreOrder, OrderItem, Partner, ExternalProduct
+#     from schemas.procurement import OrderItemResponse
+
+#     # Build query
+#     query = (
+#         select(StoreOrder, Partner)
+#         .join(Partner, StoreOrder.partner_id == Partner.partner_id)
+#         .order_by(StoreOrder.order_date.desc())
+#     )
+
+#     if user_id:
+#         query = query.where(StoreOrder.user_id == user_id)
+#     if status_filter:
+#         query = query.where(StoreOrder.order_status == status_filter)
+
+#     result = await session.execute(query)
+#     orders = result.all()
+
+#     order_responses = []
+#     for order, partner in orders:
+#         # Get order items
+#         items_result = await session.execute(
+#             select(OrderItem, ExternalProduct)
+#             .join(ExternalProduct, OrderItem.external_sku == ExternalProduct.external_sku)
+#             .where(OrderItem.order_id == order.order_id)
+#         )
+#         items = items_result.all()
+
+#         item_responses = [
+#             OrderItemResponse(
+#                 external_sku=item.external_sku,
+#                 product_name=product.product_name,
+#                 partner_name=partner.partner_name,
+#                 quantity=item.quantity,
+#                 deal_price=item.deal_price,
+#                 subtotal=item.deal_price * item.quantity
+#             )
+#             for item, product in items
+#         ]
+
+#         order_responses.append(
+#             OrderResponse(
+#                 order_id=order.order_id,
+#                 user_id=order.user_id,
+#                 partner_id=order.partner_id,
+#                 partner_name=partner.partner_name,
+#                 order_date=order.order_date,
+#                 expected_arrival=order.expected_arrival,
+#                 total_price=order.total_price,
+#                 order_status=order.order_status,
+#                 items=item_responses
+#             )
+#         )
+
+#     return order_responses

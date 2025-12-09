@@ -64,3 +64,11 @@ export const revokeRole = async (userId, roleName) => {
   const res = await api.delete(`/admin/users/${userId}/roles/${roleName}`);
   return res.data;
 };
+
+// 分頁取得訂單
+export const getOrders = async (page, pageSize) => {
+  const res = await api.get("/admin/orders", {
+    params: { page, page_size: pageSize }
+  });
+  return res.data;
+};
