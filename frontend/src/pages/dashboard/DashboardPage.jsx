@@ -56,12 +56,12 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          <Link to="/meal-plans" className="card-link">
+          {/* <Link to="/meal-plans" className="card-link">
             <div className="card">
               <h2>📅 Meal Plans</h2>
               <p>Plan meals on a calendar.</p>
             </div>
-          </Link>
+          </Link> */}
 
           {/* ⭐ Admin 仍保留 admin 卡片（如果有多角色時）*/}
           {user?.roles?.includes("Admin") && (

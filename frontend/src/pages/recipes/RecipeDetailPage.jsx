@@ -174,29 +174,6 @@ export default function RecipeDetailPage() {
       </section>
 
       {/* ------------------------------ */}
-      {/* Reviews - List */}
-      {/* ------------------------------ */}
-      <section className="section">
-        <h2>Reviews</h2>
-
-        {reviews.length === 0 ? (
-          <p>No reviews yet.</p>
-        ) : (
-          <ul className="list">
-            {reviews.map((r) => (
-              <li key={r.user_id} className="list-item">
-                <strong>{r.user_name}</strong> — ⭐ {r.rating}
-                <br />
-                {r.comment}
-                <br />
-                <span className="muted">{new Date(r.review_date).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* ------------------------------ */}
       {/* Add / Update Review */}
       {/* ------------------------------ */}
       <section className="section">
@@ -226,6 +203,30 @@ export default function RecipeDetailPage() {
           <p style={{ marginTop: 10, color: "green" }}>{reviewMessage}</p>
         )}
       </section>
+
+      {/* ------------------------------ */}
+      {/* Reviews - List */}
+      {/* ------------------------------ */}
+      <section className="section">
+        <h2>Reviews</h2>
+
+        {reviews.length === 0 ? (
+          <p>No reviews yet.</p>
+        ) : (
+          <ul className="list">
+            {reviews.map((r) => (
+              <li key={r.user_id} className="list-item">
+                <strong>{r.user_name}</strong> — ⭐ {r.rating}
+                <br />
+                {r.comment}
+                <br />
+                <span className="muted">{new Date(r.review_date).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
     </div>
   );
 }

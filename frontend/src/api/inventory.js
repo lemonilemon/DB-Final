@@ -15,3 +15,10 @@ export const deleteItem = async (fridgeId, itemId) => {
   const res = await api.delete(`/fridges/${fridgeId}/items/${itemId}`);
   return res.data;
 };
+
+
+// ⭐ 新增：更新冰箱內的食材（PUT）
+export const updateItem = async (fridgeId, itemId, payload) => {
+  const res = await api.put(`/fridges/${fridgeId}/items/${itemId}`, payload);
+  return res.data;
+};

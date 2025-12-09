@@ -64,3 +64,4 @@ export const consumeIngredient = async (fridgeId, data) => {
   const res = await api.post(`/fridges/${fridgeId}/consume`, data);
   return res.data;
 };
+

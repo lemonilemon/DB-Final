@@ -30,7 +30,7 @@ export default function Navbar() {
             <NavLink to="/recipes">Recipes</NavLink>
             <NavLink to="/shopping">Shopping</NavLink>
             <NavLink to="/orders">Orders</NavLink>
-            <NavLink to="/meal-plans">Meal Plans</NavLink>
+            {/* <NavLink to="/meal-plans">Meal Plans</NavLink> */}
 
             {/* 多角色 Admin 也能看到 Admin */}
             {user?.roles?.includes("Admin") && (

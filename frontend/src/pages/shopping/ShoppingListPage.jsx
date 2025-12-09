@@ -1,21 +1,31 @@
+// src/pages/shopping/ShoppingListPage.jsx
 import React, { useEffect, useState } from "react";
 import {
   getShoppingList,
   addShoppingItem,
   removeShoppingItem,
+  getRecommendations,
+  createOrder,
 } from "../../api/shopping";
-import { createOrdersFromList } from "../../api/orders";
 
 export default function ShoppingListPage() {
+  const today = new Date().toISOString().slice(0, 10);
+
   const [items, setItems] = useState([]);
 
+  // 訂單 preview
+  const [orderItems, setOrderItems] = useState([]);
   const [orderResult, setOrderResult] = useState(null);
 
-  // 新增項目表單
+  // Add Item Form
   const [newItem, setNewItem] = useState({
     ingredient_id: "",
     quantity_to_buy: 1,
+    needed_by: today,
   });
+
+  const [recData, setRecData] = useState(null);
+  const [loadingRec, setLoadingRec] = useState(false);
 
   const load = async () => {
     const data = await getShoppingList();
@@ -26,6 +36,9 @@ export default function ShoppingListPage() {
     load();
   }, []);
 
+  // -------------------------------
+  // ➕ Add Item to Shopping List
+  // -------------------------------
   const handleAdd = async (e) => {
     e.preventDefault();
 
@@ -37,37 +50,77 @@ export default function ShoppingListPage() {
     const payload = {
       ingredient_id: Number(newItem.ingredient_id),
       quantity_to_buy: Number(newItem.quantity_to_buy),
+      needed_by: newItem.needed_by,
     };
 
     await addShoppingItem(payload);
 
+    // Reset form
     setNewItem({
       ingredient_id: "",
       quantity_to_buy: 1,
+      needed_by: today,
     });
 
     await load();
   };
 
+  // -------------------------------
+  // 🗑 Remove Shopping Item
+  // -------------------------------
   const handleRemove = async (ingredient_id) => {
     await removeShoppingItem(ingredient_id);
     await load();
   };
 
-  const handleCreateOrders = async () => {
-    if (items.length === 0) {
-      alert("Shopping list is empty!");
+  // -----------------------------------------------------
+  // 🔍 顯示 Product Recommendations
+  // -----------------------------------------------------
+  const showRecommendations = async (it) => {
+    setLoadingRec(true);
+    try {
+      const res = await getRecommendations(
+        it.ingredient_id,
+        it.quantity_to_buy,
+        it.needed_by // 使用後端回傳的 needed_by
+      );
+      setRecData(res);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to fetch product recommendations");
+    }
+    setLoadingRec(false);
+  };
+
+  // -----------------------------------------------------
+  // ➕ 加入 Order Preview
+  // -----------------------------------------------------
+  const addOrderItem = (product) => {
+    setOrderItems((prev) => [...prev, product]);
+  };
+
+  // -----------------------------------------------------
+  // 🛒 提交訂單
+  // -----------------------------------------------------
+  const submitOrder = async () => {
+    if (orderItems.length === 0) {
+      alert("No items selected for order.");
       return;
     }
 
-    try {
-      const result = await createOrdersFromList();
-      setOrderResult(result);
-      await load(); // shopping list is cleared by backend
-    } catch (e) {
-      console.error(e);
-      alert("Failed to create orders.");
-    }
+    const payload = {
+      fridge_id: "123e4567-e89b-12d3-a456-426614174000", // TODO: Replace with real fridge_id
+      items: orderItems.map((p) => ({
+        external_sku: p.external_sku,
+        quantity: 1,
+      })),
+    };
+
+    const result = await createOrder(payload);
+    setOrderResult(result);
+
+    setOrderItems([]);
+    setRecData(null);
   };
 
   return (
@@ -89,7 +142,7 @@ export default function ShoppingListPage() {
         <input
           type="number"
           min="1"
-          placeholder="Quantity"
+          placeholder="Qty"
           value={newItem.quantity_to_buy}
           onChange={(e) =>
             setNewItem((i) => ({
@@ -100,17 +153,33 @@ export default function ShoppingListPage() {
           style={{ width: 100 }}
         />
 
-        <button className="btn-primary">Add / Update</button>
+        <input
+          type="date"
+          value={newItem.needed_by}
+          onChange={(e) =>
+            setNewItem((i) => ({ ...i, needed_by: e.target.value }))
+          }
+          style={{ width: 150 }}
+        />
+
+        <button className="btn-primary">Add</button>
       </form>
 
-      {/* Shopping List */}
+      {/* Shopping List Items */}
       <ul className="list">
         {items.map((it) => (
           <li key={it.ingredient_id} className="list-item">
             <span>
-              <strong>ID {it.ingredient_id}</strong> — {it.ingredient_name} :{" "}
-              {it.quantity_to_buy} {it.standard_unit}
+              <strong>{it.ingredient_name}</strong> — {it.quantity_to_buy}{" "}
+              {it.standard_unit} (need by {it.needed_by})
             </span>
+
+            <button
+              className="btn-secondary"
+              onClick={() => showRecommendations(it)}
+            >
+              Recommend Products
+            </button>
 
             <button
               className="btn-link danger"
@@ -122,48 +191,66 @@ export default function ShoppingListPage() {
         ))}
       </ul>
 
-      {/* Create Orders from Shopping List */}
-      <button
-        className="btn-primary"
-        style={{ marginTop: "20px" }}
-        onClick={handleCreateOrders}
-      >
-        Create Orders from Shopping List
-      </button>
+      {/* Recommendation Panel */}
+      {recData && (
+        <div className="panel">
+          <h3>Recommended Products</h3>
+          <p>
+            Need: <strong>{recData.quantity_needed}</strong> by{" "}
+            {recData.needed_by}
+          </p>
 
-      {/* Order Creation Result */}
-      {orderResult && (
-        <div style={{ marginTop: "25px", padding: "15px", border: "1px solid #ccc" }}>
-          <h3>Orders Created</h3>
-          <p><strong>Total Partners:</strong> {orderResult.total_partners}</p>
-          <p><strong>Total Orders:</strong> {orderResult.orders_created}</p>
-          <p><strong>Total Amount:</strong> {orderResult.total_amount}</p>
-
-          <h4 style={{ marginTop: "10px" }}>Order Details</h4>
           <ul>
-            {orderResult.orders.map((o) => (
-              <li key={o.order_id} style={{ marginBottom: "20px" }}>
-                <strong>Order #{o.order_id}</strong> — Partner: {o.partner_name}<br />
-                Arrival: {o.expected_arrival} | Status: {o.order_status}
-                <ul>
-                  {o.items.map((it, idx) => (
-                    <li key={idx}>
-                      {it.product_name} — {it.quantity} × {it.deal_price}
-                      <br />
-                      Subtotal: {it.subtotal}
-                    </li>
-                  ))}
-                </ul>
+            {recData.products.map((p, idx) => (
+              <li key={idx} style={{ marginBottom: "10px" }}>
+                <strong>{p.product_name}</strong> — ${p.current_price} <br />
+                Partner: {p.partner_name} <br />
+                Arrives: {p.expected_arrival}{" "}
+                {p.expected_arrival <= recData.needed_by ? "✓" : "❌"} <br />
+                <button
+                  className="btn-primary"
+                  onClick={() => addOrderItem(p)}
+                >
+                  Add to Order Preview
+                </button>
               </li>
             ))}
           </ul>
 
-          <button
-            className="btn-link danger"
-            onClick={() => setOrderResult(null)}
-            style={{ marginTop: "10px" }}
-          >
-            Clear Result
+          <button className="btn-link" onClick={() => setRecData(null)}>
+            Close Recommendations
+          </button>
+        </div>
+      )}
+
+      {/* Order Preview */}
+      {orderItems.length > 0 && (
+        <div className="panel">
+          <h3>Order Preview</h3>
+          <ul>
+            {orderItems.map((p, idx) => (
+              <li key={idx}>
+                {p.product_name} — {p.partner_name}
+              </li>
+            ))}
+          </ul>
+
+          <button className="btn-primary" onClick={submitOrder}>
+            Submit Order
+          </button>
+        </div>
+      )}
+
+      {/* Order Result */}
+      {orderResult && (
+        <div className="panel">
+          <h3>Order Created!</h3>
+          <p>ID: {orderResult.order_id}</p>
+          <p>Total: {orderResult.total_price}</p>
+          <p>Status: {orderResult.order_status}</p>
+
+          <button className="btn-link" onClick={() => setOrderResult(null)}>
+            Clear
           </button>
         </div>
       )}

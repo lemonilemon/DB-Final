@@ -99,6 +99,7 @@ export default function AdminPartners() {
         product_name: productForm.product_name,
         current_price: Number(productForm.current_price),
         selling_unit: productForm.selling_unit,
+        unit_quantity: Number(productForm.unit_quantity),  // ⭐ 必須加入
       });
       setProductForm({
         external_sku: "",
@@ -107,6 +108,7 @@ export default function AdminPartners() {
         product_name: "",
         current_price: "",
         selling_unit: "",
+        unit_quantity: "",   // ⭐
       });
       await loadAll();
     } catch (err) {
@@ -249,6 +251,14 @@ export default function AdminPartners() {
                 name="selling_unit"
                 placeholder="Selling unit (e.g., 1L Bottle)"
                 value={productForm.selling_unit}
+                onChange={handleProductChange}
+              />
+              <input
+                name="unit_quantity"
+                type="number"
+                min="1"
+                placeholder="Unit quantity (e.g. 1000 ml)"
+                value={productForm.unit_quantity}
                 onChange={handleProductChange}
               />
               <button type="submit">新增商品</button>
