@@ -417,7 +417,14 @@ class BehaviorService:
             {"user_id": str(user_id)}
         ).sort("timestamp", -1).limit(limit)
 
-        return await cursor.to_list(length=limit)
+        results = await cursor.to_list(length=limit)
+        
+        # Convert ObjectId to string for JSON serialization
+        for doc in results:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+                
+        return results
 
     @staticmethod
     async def clear_old_logs(days_to_keep: int = 90):
