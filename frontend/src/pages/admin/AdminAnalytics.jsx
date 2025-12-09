@@ -7,6 +7,7 @@ import {
   getEndpointStats,
   getSearchTrends,
 } from "../../api/analytics";
+import api from "../../api/client";
 
 export default function AdminAnalytics() {
   const [activity, setActivity] = useState(null);
@@ -25,8 +26,44 @@ export default function AdminAnalytics() {
     loadAll();
   }, []);
 
+  // 🔥 用 recipe_id 打 API 補食譜名稱
+  async function fetchRecipeName(recipeId) {
+    try {
+      const res = await api.get(`/recipes/${recipeId}`);
+      return res.data.recipe_name || "未知名稱";
+    } catch (err) {
+      return "未知名稱";
+    }
+  }
+
+  // ⭐ 主功能：載入所有資料並補完整食譜名稱
   const loadAll = async () => {
-    setActivity(await getUserActivity(30));
+    const act = await getUserActivity(30);
+
+    // ⭐ 補最常查看食譜名稱
+    const enrichedViewed = await Promise.all(
+      act.most_viewed_recipes.map(async (item) => ({
+        ...item,
+        recipe_name: await fetchRecipeName(item.recipe_id),
+        view_count: item.views,
+      }))
+    );
+
+    // ⭐ 補最常烹飪食譜名稱
+    const enrichedCooked = await Promise.all(
+      act.most_cooked_recipes.map(async (item) => ({
+        ...item,
+        recipe_name: await fetchRecipeName(item.recipe_id),
+        cook_count: item.times_cooked,
+      }))
+    );
+
+    setActivity({
+      ...act,
+      most_viewed_recipes: enrichedViewed,
+      most_cooked_recipes: enrichedCooked,
+    });
+
     setRecentActions(await getRecentActions(20));
     setApiStats(await getEndpointStats(endpoint, method, 7));
     setSearchTrends(await getSearchTrends(30));
@@ -67,10 +104,12 @@ export default function AdminAnalytics() {
                   {formatDate(activity.period_end)}
                 </td>
               </tr>
+
               <tr>
                 <th>總活動次數</th>
                 <td>{activity.total_actions}</td>
               </tr>
+
               <tr>
                 <th>活動類型統計</th>
                 <td>
@@ -83,6 +122,8 @@ export default function AdminAnalytics() {
                       ))}
                 </td>
               </tr>
+
+              {/* ⭐ 最常查看食譜 */}
               <tr>
                 <th>最常查看的食譜</th>
                 <td>
@@ -99,6 +140,8 @@ export default function AdminAnalytics() {
                   )}
                 </td>
               </tr>
+
+              {/* ⭐ 最常烹飪食譜 */}
               <tr>
                 <th>最常烹飪的食譜</th>
                 <td>
@@ -120,7 +163,7 @@ export default function AdminAnalytics() {
         )}
       </div>
 
-      {/* ================== 最近活動紀錄（含分頁 + 分隔線） ================== */}
+      {/* ================== 最近活動紀錄 ================== */}
       <div className="card">
         <h3>🕒 最近活動紀錄</h3>
 
@@ -128,7 +171,6 @@ export default function AdminAnalytics() {
           <p>無活動紀錄</p>
         ) : (
           <>
-            {/* PageSize 選擇器 */}
             <div style={{ marginBottom: 12 }}>
               <label>
                 每頁顯示：
@@ -143,13 +185,12 @@ export default function AdminAnalytics() {
                   <option value={3}>3</option>
                   <option value={5}>5</option>
                   <option value={10}>10</option>
-                  <option value={20}>20</option>
                 </select>
                 筆
               </label>
             </div>
 
-            {/* ⭐ 美化過的分隔卡片列表 */}
+            {/* 卡片樣式 */}
             <div className="list">
               {paginatedActions.map((log, index) => (
                 <div key={log._id} style={{ marginBottom: "16px" }}>
@@ -161,12 +202,12 @@ export default function AdminAnalytics() {
                       <strong>時間：</strong> {formatDate(log.timestamp)}
                     </div>
                     <div>
-                      <strong>使用者：</strong> {log.metadata?.user_name}（
-                      {log.metadata?.role}）
+                      <strong>使用者：</strong>
+                      {log.metadata?.user_name || "匿名"}（
+                      {log.metadata?.role || "-"}）
                     </div>
                   </div>
 
-                  {/* ⭐ 自動加入分隔線（最後一筆不加入） */}
                   {index !== paginatedActions.length - 1 && (
                     <hr style={{ border: "0.5px solid #ccc", marginTop: 12 }} />
                   )}
@@ -174,7 +215,7 @@ export default function AdminAnalytics() {
               ))}
             </div>
 
-            {/* ⭐ 分頁按鈕 */}
+            {/* 分頁 */}
             <div style={{ marginTop: 12, display: "flex", alignItems: "center" }}>
               <button
                 disabled={currentPage <= 1}
@@ -295,7 +336,7 @@ export default function AdminAnalytics() {
               <ul>
                 {searchTrends.top_queries.map((q, i) => (
                   <li key={i}>
-                    {q.query}（{q.count} 次）
+                    {q.query_text}（{q.search_count} 次）
                   </li>
                 ))}
               </ul>
@@ -313,7 +354,7 @@ export default function AdminAnalytics() {
             )}
 
             <p style={{ marginTop: 10 }}>
-              平均回傳數量：{searchTrends.avg_results_per_query}
+              平均每次搜尋回傳數量：{searchTrends.avg_results_per_query}
             </p>
           </>
         )}

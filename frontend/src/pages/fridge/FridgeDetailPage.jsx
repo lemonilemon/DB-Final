@@ -340,122 +340,122 @@ export default function FridgeDetailPage() {
     setSearchResults(results);
   };
 
-  // const handleCreateMealPlan = async (e) => {
-  //   e.preventDefault();
-
-  //   if (!mealDate || !selectedRecipe)
-  //     return alert("請選擇日期與食譜");
-
-  //   // ⭐ Step 1：呼叫 availability check API
-  //   const recipeId = selectedRecipe.recipe_id;
-  //   let availability;
-
-  //   try {
-  //     availability = await checkAvailability(
-  //       recipeId,
-  //       fridgeId,
-  //       mealDate
-  //     );
-  //   } catch (err) {
-  //     console.error("Availability check failed:", err);
-  //     return alert("無法檢查庫存，請稍後再試");
-  //   }
-
-  //   console.log("Availability result:", availability);
-
-  //   // ⭐ Step 2：如果全部足夠 → 直接建立 Meal Plan
-  //   if (availability.all_available) {
-  //     await createMealPlan({
-  //       recipe_id: recipeId,
-  //       fridge_id: fridgeId,
-  //       planned_date: mealDate,
-  //     });
-
-  //     setMealDate("");
-  //     setSelectedRecipe(null);
-  //     setRecipeQuery("");
-  //     setSearchResults([]);
-
-  //     await loadMealPlans();
-
-  //     return alert("Meal plan created!");
-  //   }
-
-  //   // ⭐ Step 3：若不足 → 顯示缺少清單並詢問是否自動加入購物清單
-  //   const missing = availability.missing_ingredients;
-
-  //   let msg = "以下食材不足：\n\n";
-  //   for (const m of missing) {
-  //     msg += `• ${m.ingredient_name} (${m.shortage} ${m.standard_unit})\n`;
-  //   }
-  //   msg += "\n要自動加入購物清單嗎？";
-
-  //   const addToCart = window.confirm(msg);
-
-  //   if (addToCart) {
-  //     try {
-  //       for (const m of missing) {
-  //         await addShoppingItem({
-  //           ingredient_id: m.ingredient_id,
-  //           needed_by: mealDate,
-  //           quantity_to_buy: m.shortage,
-  //         });
-  //       }
-  //       alert("已將所有缺少的食材加入購物清單！");
-  //     } catch (err) {
-  //       console.error("Add shopping failed:", err);
-  //       alert("加入購物清單時失敗");
-  //     }
-  //   }
-
-  //   // ⭐ Step 4：詢問是否仍建立 Meal Plan
-  //   const stillCreate = window.confirm("是否仍然要建立這份 Meal Plan？");
-
-  //   if (!stillCreate) return;
-
-  //   await createMealPlan({
-  //     recipe_id: recipeId,
-  //     fridge_id: fridgeId,
-  //     planned_date: mealDate,
-  //   });
-
-  //   setMealDate("");
-  //   setSelectedRecipe(null);
-  //   setRecipeQuery("");
-  //   setSearchResults([]);
-
-  //   await loadMealPlans();
-
-  //   alert("Meal plan created（含缺料提醒）!");
-  // };
   const handleCreateMealPlan = async (e) => {
     e.preventDefault();
 
     if (!mealDate || !selectedRecipe)
       return alert("請選擇日期與食譜");
 
+    // ⭐ Step 1：呼叫 availability check API
+    const recipeId = selectedRecipe.recipe_id;
+    let availability;
+
     try {
-      const result = await createMealPlan({
-        recipe_id: selectedRecipe.recipe_id,
+      availability = await checkAvailability(
+        recipeId,
+        fridgeId,
+        mealDate
+      );
+    } catch (err) {
+      console.error("Availability check failed:", err);
+      return alert("無法檢查庫存，請稍後再試");
+    }
+
+    console.log("Availability result:", availability);
+
+    // ⭐ Step 2：如果全部足夠 → 直接建立 Meal Plan
+    if (availability.all_available) {
+      await createMealPlan({
+        recipe_id: recipeId,
         fridge_id: fridgeId,
         planned_date: mealDate,
       });
 
-      console.log("📦 Meal Plan API 回傳：", result);  // ⭐ 新增：印出回傳內容
-      alert("Meal plan created!");
-
-      // reset UI
       setMealDate("");
       setSelectedRecipe(null);
       setRecipeQuery("");
       setSearchResults([]);
 
       await loadMealPlans();
-    } catch (err) {
-      console.error("❌ Create meal plan failed:", err);
-      alert("無法建立 meal plan，請稍後再試");
+
+      return alert("Meal plan created!");
     }
+
+    // ⭐ Step 3：若不足 → 顯示缺少清單並詢問是否自動加入購物清單
+    const missing = availability.missing_ingredients;
+
+    let msg = "以下食材不足：\n\n";
+    for (const m of missing) {
+      msg += `• ${m.ingredient_name} (${m.shortage} ${m.standard_unit})\n`;
+    }
+    msg += "\n要自動加入購物清單嗎？";
+
+    const addToCart = window.confirm(msg);
+
+    if (addToCart) {
+      try {
+        for (const m of missing) {
+          await addShoppingItem({
+            ingredient_id: m.ingredient_id,
+            needed_by: mealDate,
+            quantity_to_buy: m.shortage,
+          });
+        }
+        alert("已將所有缺少的食材加入購物清單！");
+      } catch (err) {
+        console.error("Add shopping failed:", err);
+        alert("加入購物清單時失敗");
+      }
+    }
+
+    // ⭐ Step 4：詢問是否仍建立 Meal Plan
+    const stillCreate = window.confirm("是否仍然要建立這份 Meal Plan？");
+
+    if (!stillCreate) return;
+
+    await createMealPlan({
+      recipe_id: recipeId,
+      fridge_id: fridgeId,
+      planned_date: mealDate,
+    });
+
+    setMealDate("");
+    setSelectedRecipe(null);
+    setRecipeQuery("");
+    setSearchResults([]);
+
+    await loadMealPlans();
+
+    alert("Meal plan created（含缺料提醒）!");
   };
+  // const handleCreateMealPlan = async (e) => {
+  //   e.preventDefault();
+
+  //   if (!mealDate || !selectedRecipe)
+  //     return alert("請選擇日期與食譜");
+
+  //   try {
+  //     const result = await createMealPlan({
+  //       recipe_id: selectedRecipe.recipe_id,
+  //       fridge_id: fridgeId,
+  //       planned_date: mealDate,
+  //     });
+
+  //     console.log("📦 Meal Plan API 回傳：", result);  // ⭐ 新增：印出回傳內容
+  //     alert("Meal plan created!");
+
+  //     // reset UI
+  //     setMealDate("");
+  //     setSelectedRecipe(null);
+  //     setRecipeQuery("");
+  //     setSearchResults([]);
+
+  //     await loadMealPlans();
+  //   } catch (err) {
+  //     console.error("❌ Create meal plan failed:", err);
+  //     alert("無法建立 meal plan，請稍後再試");
+  //   }
+  // };
 
 
 

@@ -7,6 +7,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -15,12 +16,21 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setLoading(true);
+
     try {
       await login(form.username, form.password);
-      navigate("/");
+
+      // 短暫延遲，確保 token/user 已寫入 sessionStorage
+      setTimeout(() => {
+        navigate("/");
+      }, 100);
+
     } catch (err) {
-      console.error(err);
-      setError("Login failed. Please check username / password.");
+      console.error("❌ Login failed:", err);
+      setError("Login failed. Please check username or password.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -28,6 +38,7 @@ export default function LoginPage() {
     <div className="auth-page">
       <div className="auth-card">
         <h1>Login</h1>
+
         <form onSubmit={handleSubmit} className="auth-form">
           <label>
             Username
@@ -36,6 +47,7 @@ export default function LoginPage() {
               value={form.username}
               onChange={handleChange}
               autoComplete="username"
+              disabled={loading}
             />
           </label>
 
@@ -47,13 +59,18 @@ export default function LoginPage() {
               value={form.password}
               onChange={handleChange}
               autoComplete="current-password"
+              disabled={loading}
             />
           </label>
 
           {error && <p className="error-text">{error}</p>}
 
-          <button type="submit" className="btn-primary">
-            Login
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={loading}
+          >
+            {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 

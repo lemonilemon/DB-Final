@@ -50,6 +50,7 @@ export default function AdminOrders() {
   };
 
   const handleUpdate = async (orderId, newStatus) => {
+
     try {
         await updateOrderStatus(orderId, newStatus);
         alert("Order status updated!");
@@ -61,6 +62,32 @@ export default function AdminOrders() {
 
   // 判斷是否還有下一頁 (如果回傳的筆數少於 pageSize，代表是最後一頁了)
   const hasNextPage = orders.length === pageSize;
+
+    await updateOrderStatus(orderId, newStatus);
+
+    // 立即更新畫面，不等待 loadOrders()
+    setOrders(prev =>
+      prev.map(o =>
+        o.order_id === orderId ? { ...o, order_status: newStatus } : o
+      )
+    );
+
+    alert("Order status updated!");
+  };
+
+
+  // pagination calculation
+  const totalPages =
+    orders.length === 0 ? 1 : Math.ceil(orders.length / pageSize);
+
+  const currentItems = orders.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  const formatDateTime = (t) =>
+    t ? new Date(t).toLocaleString("zh-TW", { hour12: false }) : "—";
+
 
   return (
     <div>

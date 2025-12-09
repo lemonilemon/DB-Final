@@ -6,11 +6,22 @@ Generates realistic historical data for:
 2. search_queries - Recipe/ingredient searches
 3. api_usage - API performance monitoring
 """
+
+import os
+import sys
+
+# Add /app to Python path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+
+
 import asyncio
 import random
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from mongodb import init_mongo, get_database
+# from app.mongodb import init_mongo, get_database
+
 from database import init_db, async_session_maker
 from models.user import User
 from models.recipe import Recipe
@@ -371,7 +382,7 @@ async def generate_all_behavioral_data():
         api_log = {
             "endpoint": endpoint,
             "method": method,
-            "user_id": None,  # Anonymous
+            "user_id": "anonymous",  # Anonymous
             "status_code": status_code,
             "response_time_ms": response_time_ms,
             "timestamp": timestamp,
