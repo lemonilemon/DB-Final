@@ -494,13 +494,16 @@ class ProcurementService:
         return order_responses
 
     @staticmethod
-    async def update_order_status(
+    async def cancel_order(
         order_id: int,
-        request: OrderUpdateStatusRequest,
         current_user_id: UUID,
         session: AsyncSession
     ) -> None:
-        """Update order status (user can update their own orders)."""
+        """
+        Cancel a pending order (users can only cancel their own pending orders).
+        """
+        from core.order_status import OrderStatusManager
+
         result = await session.execute(
             select(StoreOrder).where(
                 and_(
@@ -514,9 +517,185 @@ class ProcurementService:
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        order.order_status = request.order_status
+        # Validate transition using state machine
+        OrderStatusManager.validate_transition(
+            current_status=order.order_status,
+            new_status="Cancelled",
+            role="user"
+        )
+
+        order.order_status = "Cancelled"
         session.add(order)
         await session.commit()
+
+    @staticmethod
+    async def confirm_delivery(
+        order_id: int,
+        current_user_id: UUID,
+        session: AsyncSession
+    ) -> int:
+        """
+        Confirm order delivery (users can mark their own shipped orders as delivered).
+
+        When marked as delivered:
+        - Order items are automatically added to fridge inventory
+        - Quantities are converted from selling units to standard units
+        - Expiry dates are set (delivery date + 7 days)
+        - Meal plan statuses are updated
+
+        Returns:
+            Number of items added to fridge
+        """
+        from core.order_status import OrderStatusManager
+
+        result = await session.execute(
+            select(StoreOrder).where(
+                and_(
+                    StoreOrder.order_id == order_id,
+                    StoreOrder.user_id == current_user_id
+                )
+            )
+        )
+        order = result.scalar_one_or_none()
+
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Validate transition using state machine
+        OrderStatusManager.validate_transition(
+            current_status=order.order_status,
+            new_status="Delivered",
+            role="user"
+        )
+
+        # Update status
+        order.order_status = "Delivered"
+        session.add(order)
+
+        # Add items to fridge automatically
+        items_added = await ProcurementService.add_delivered_order_to_fridge(
+            order, session
+        )
+
+        # Update meal plan statuses for this fridge
+        if order.fridge_id:
+            await ProcurementService.update_meal_plan_statuses(
+                order.fridge_id, session
+            )
+
+        await session.commit()
+
+        return items_added
+
+    @staticmethod
+    async def add_delivered_order_to_fridge(
+        order: StoreOrder,
+        session: AsyncSession
+    ) -> int:
+        """
+        Add delivered order items to the fridge inventory.
+
+        Process:
+        1. Get all order items
+        2. Convert selling units to standard units
+        3. Create fridge_item records with expiry dates
+        4. Add to fridge
+
+        Returns:
+            Number of fridge items created
+        """
+        from models.inventory import FridgeItem
+
+        # Check if order has a fridge (nullable FK)
+        if not order.fridge_id:
+            # Order placed without fridge association (e.g., fridge was deleted)
+            return 0
+
+        # Get all order items
+        order_items_result = await session.execute(
+            select(OrderItem, ExternalProduct)
+            .join(
+                ExternalProduct,
+                and_(
+                    OrderItem.partner_id == ExternalProduct.partner_id,
+                    OrderItem.external_sku == ExternalProduct.external_sku
+                )
+            )
+            .where(OrderItem.order_id == order.order_id)
+        )
+        order_items = order_items_result.all()
+
+        items_created = 0
+        today = date.today()
+
+        for order_item, product in order_items:
+            # Convert selling_unit to standard_unit
+            standard_quantity = order_item.quantity * product.unit_quantity
+
+            # Set expiry date based on ingredient type
+            # Default: 7 days for perishables, can be enhanced with ingredient-specific logic
+            expiry_date = today + timedelta(days=7)
+
+            # Create fridge item
+            fridge_item = FridgeItem(
+                fridge_id=order.fridge_id,
+                ingredient_id=product.ingredient_id,
+                quantity=standard_quantity,
+                expiry_date=expiry_date
+            )
+            session.add(fridge_item)
+            items_created += 1
+
+        await session.flush()  # Flush to database
+        return items_created
+
+    @staticmethod
+    async def admin_update_order_status(
+        order_id: int,
+        request: OrderUpdateStatusRequest,
+        session: AsyncSession
+    ) -> StoreOrder:
+        """
+        [Admin] Update order status with state machine validation.
+
+        When status is changed to "Delivered", automatically adds items to fridge.
+        """
+        from core.order_status import OrderStatusManager
+
+        result = await session.execute(
+            select(StoreOrder).where(StoreOrder.order_id == order_id)
+        )
+        order = result.scalar_one_or_none()
+
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Validate transition using state machine (admin role)
+        OrderStatusManager.validate_transition(
+            current_status=order.order_status,
+            new_status=request.order_status,
+            role="admin"
+        )
+
+        old_status = order.order_status
+        order.order_status = request.order_status
+        session.add(order)
+
+        # If order is being marked as delivered, add items to fridge
+        if request.order_status == "Delivered" and old_status != "Delivered":
+            items_added = await ProcurementService.add_delivered_order_to_fridge(
+                order, session
+            )
+
+            # Update meal plan statuses for this fridge (new inventory may make plans "Ready")
+            if order.fridge_id:
+                await ProcurementService.update_meal_plan_statuses(
+                    order.fridge_id, session
+                )
+
+        await session.commit()
+
+        return order
 
     # ========================================================================
     # Availability Check
@@ -596,6 +775,46 @@ class ProcurementService:
             # Initialize batches (list of [quantity, expiry_date])
             batches = [[item.quantity, item.expiry_date] for item in items]
 
+            # Get pending/shipped orders for this ingredient (within 14 days)
+            from models.procurement import StoreOrder, OrderItem
+
+            pending_orders_result = await session.execute(
+                select(OrderItem, StoreOrder, ExternalProduct)
+                .join(StoreOrder, OrderItem.order_id == StoreOrder.order_id)
+                .join(
+                    ExternalProduct,
+                    and_(
+                        OrderItem.partner_id == ExternalProduct.partner_id,
+                        OrderItem.external_sku == ExternalProduct.external_sku
+                    )
+                )
+                .where(
+                    and_(
+                        ExternalProduct.ingredient_id == requirement.ingredient_id,
+                        StoreOrder.fridge_id == fridge_id,
+                        StoreOrder.order_status.in_(["Pending", "Processing", "Shipped"]),
+                        StoreOrder.expected_arrival.isnot(None),
+                        StoreOrder.expected_arrival >= today,
+                        StoreOrder.expected_arrival <= cutoff_date
+                    )
+                )
+            )
+
+            # Collect arrival events (add to batches on arrival date)
+            arrival_events = []  # List of (arrival_date, quantity_in_standard_unit, expiry_date)
+            for order_item, order, product in pending_orders_result.all():
+                # Convert selling_unit to standard_unit
+                standard_quantity = order_item.quantity * product.unit_quantity
+
+                # Assume ingredients expire 7 days after arrival (configurable)
+                assumed_expiry = order.expected_arrival + timedelta(days=7)
+
+                arrival_events.append((
+                    order.expected_arrival,
+                    standard_quantity,
+                    assumed_expiry
+                ))
+
             # Collect consumption events
             consumption_events = []  # List of (date, quantity_to_consume)
 
@@ -619,15 +838,36 @@ class ProcurementService:
             # Event 2: This recipe's consumption at needed_by
             consumption_events.append((needed_by, requirement.quantity_needed))
 
-            # Sort consumption events by date
-            consumption_events.sort(key=lambda x: x[0])
+            # Merge arrival and consumption events
+            all_events = []
+            for date, qty in consumption_events:
+                all_events.append(("consume", date, qty))
+            for date, qty, expiry in arrival_events:
+                all_events.append(("arrive", date, qty, expiry))
 
-            # Simulate timeline with FIFO consumption
+            # Sort all events by date chronologically
+            all_events.sort(key=lambda x: x[1])
+
+            # Simulate timeline with FIFO consumption and arrivals
             current_quantity = Decimal(0)
             min_quantity = Decimal(0)
             first_shortage_date = None
 
-            for event_date, quantity_to_consume in consumption_events:
+            for event in all_events:
+                event_type = event[0]
+                event_date = event[1]
+
+                if event_type == "arrive":
+                    # Arrival event: Add new batch to inventory
+                    arrival_quantity = event[2]
+                    arrival_expiry = event[3]
+                    batches.append([arrival_quantity, arrival_expiry])
+                    # Re-sort batches by expiry (maintain FIFO order)
+                    batches.sort(key=lambda x: x[1])
+                    continue
+
+                # Consumption event
+                quantity_to_consume = event[2]
                 # Remove expired batches before this event
                 batches = [[qty, exp] for qty, exp in batches if exp >= event_date]
 

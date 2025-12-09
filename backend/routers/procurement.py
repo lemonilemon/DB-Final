@@ -353,28 +353,69 @@ async def get_orders(
 
 
 @order_router.put(
-    "/{order_id}/status",
+    "/{order_id}/cancel",
     response_model=MessageResponse,
-    summary="Update order status"
+    summary="Cancel your pending order"
 )
-async def update_order_status(
+async def cancel_order(
     order_id: int,
-    request: OrderUpdateStatusRequest,
     current_user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session)
 ):
     """
-    Update the status of your order.
+    Cancel your pending order.
 
-    Valid statuses: Pending, Processing, Shipped, Delivered, Cancelled
+    **Restrictions:**
+    - You can only cancel YOUR OWN orders
+    - Order must be in "Pending" status
+    - Cannot cancel orders that are Processing, Shipped, or Delivered
+
+    **Use case:** Changed your mind? Cancel the order before the partner starts processing it.
     """
-    await ProcurementService.update_order_status(
-        order_id, request, current_user_id, session
+    await ProcurementService.cancel_order(
+        order_id, current_user_id, session
     )
 
     return MessageResponse(
-        message="Order status updated",
-        detail=f"Order #{order_id} status: {request.order_status}"
+        message="Order cancelled successfully",
+        detail=f"Order #{order_id} has been cancelled"
+    )
+
+
+@order_router.put(
+    "/{order_id}/confirm-delivery",
+    response_model=MessageResponse,
+    summary="Confirm order delivery"
+)
+async def confirm_delivery(
+    order_id: int,
+    current_user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Confirm that you received your shipped order.
+
+    **What happens automatically:**
+    - Order status changes to "Delivered"
+    - All order items are added to your fridge inventory
+    - Quantities converted to standard units (e.g., bottles → ml)
+    - Expiry dates set (delivery date + 7 days)
+    - Meal plan statuses updated (may change "Insufficient" → "Ready")
+
+    **Restrictions:**
+    - You can only confirm YOUR OWN orders
+    - Order must be in "Shipped" status
+    - Cannot confirm Pending, Processing, or already Delivered orders
+
+    **Use case:** Package arrived at your door? Confirm delivery to add items to your fridge!
+    """
+    items_added = await ProcurementService.confirm_delivery(
+        order_id, current_user_id, session
+    )
+
+    return MessageResponse(
+        message="Delivery confirmed successfully",
+        detail=f"Order #{order_id} delivered. {items_added} item(s) added to your fridge."
     )
 
 
@@ -397,36 +438,28 @@ async def admin_update_order_status(
     session: AsyncSession = Depends(get_session)
 ):
     """
-    **[Admin Only]** Update the status of ANY order.
+    **[Admin Only]** Update the status of ANY order with validation.
 
-    Valid statuses:
-    - Pending
-    - Processing
-    - Shipped
-    - Delivered
-    - Cancelled
+    **Valid status transitions:**
+    - Pending → Processing, Cancelled
+    - Processing → Shipped, Cancelled
+    - Shipped → Delivered
+    - Delivered → (terminal state, no transitions)
+    - Cancelled → (terminal state, no transitions)
 
-    Use this to manage orders on behalf of users or handle customer service issues.
+    **State machine enforced:**
+    - Cannot skip statuses (e.g., Pending → Delivered)
+    - Cannot reverse progress (e.g., Shipped → Pending)
+    - Terminal states cannot be changed
+
+    **Use cases:**
+    - Update order status on behalf of partners
+    - Handle customer service issues
+    - Manually mark orders as delivered
     """
-    from sqlalchemy import select, update
-    from models.procurement import StoreOrder
-
-    # Check if order exists
-    result = await session.execute(
-        select(StoreOrder).where(StoreOrder.order_id == order_id)
+    order = await ProcurementService.admin_update_order_status(
+        order_id, request, session
     )
-    order = result.scalar_one_or_none()
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    # Update status
-    await session.execute(
-        update(StoreOrder)
-        .where(StoreOrder.order_id == order_id)
-        .values(order_status=request.order_status)
-    )
-    await session.commit()
 
     return MessageResponse(
         message="Order status updated by admin",

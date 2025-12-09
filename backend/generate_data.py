@@ -322,7 +322,7 @@ async def create_users(session: AsyncSession, count=100):
         user = User(
             user_name=username,
             email=unique_email,
-            password="$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYfZl3w3aCK",  # "password123"
+            password="$2b$12$q1EplR74rbbr8LOguX1ijOm.la4wq7415r2J8L46sroRI3o0ASNf.",  # "password123"
             status="Active",
             role="Admin" if i < 3 else "User"
         )

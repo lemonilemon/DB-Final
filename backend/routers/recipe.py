@@ -241,3 +241,30 @@ async def get_meal_plans(
     return await RecipeService.get_meal_plans(
         current_user_id, session, fridge_id, start_date, end_date
     )
+
+
+@meal_plan_router.delete(
+    "/{plan_id}",
+    response_model=MessageResponse,
+    summary="Delete meal plan"
+)
+async def delete_meal_plan(
+    plan_id: int,
+    current_user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Delete a meal plan.
+
+    **Restrictions:**
+    - You can only delete YOUR OWN meal plans
+    - Cannot delete plans that don't belong to you
+
+    **Use case:** Changed your meal plan? Remove it from your schedule.
+    """
+    await RecipeService.delete_meal_plan(plan_id, current_user_id, session)
+
+    return MessageResponse(
+        message="Meal plan deleted successfully",
+        detail=f"Plan #{plan_id} has been removed from your schedule"
+    )
